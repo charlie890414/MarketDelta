@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: market
+      POSTGRES_PASSWORD: market
+      POSTGRES_DB: market_changes
+    ports: ["5432:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market -d market_changes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    working_dir: /app/backend
+    command: sh -c "uv run alembic upgrade head && uv run python -m app.seed && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file: [.env]
+    ports: ["8000:8000"]
+    volumes: ["./backend:/app/backend", "/app/backend/.venv"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  scheduler:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    working_dir: /app/backend
+    command: uv run python -m app.scheduler.main
+    env_file: [.env]
+    volumes: ["./backend:/app/backend", "/app/backend/.venv"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+    working_dir: /app/frontend
+    command: npm run dev -- --webpack --hostname 0.0.0.0
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3001:3000"]
+    volumes: ["./frontend:/app/frontend"]
+    depends_on: [backend]
+
+volumes:
+  postgres_data:
