@@ -1,0 +1,14 @@
+[
+  {
+    "symbol": "AMD",
+    "external_id": "fixture-amd-20260811-1",
+    "headline": "AMD expands data center product roadmap",
+    "published_at": "2026-08-11T08:00:00+00:00",
+    "source_name": "Fixture Wire",
+    "source_url": "https://example.invalid/news/amd-1",
+    "category": "Product",
+    "importance_score": 72.0,
+    "is_material": true,
+    "summary": "Fixture news item for parser and API tests."
+  }
+]

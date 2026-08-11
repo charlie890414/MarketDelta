@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -130,6 +131,24 @@ class FlowDaily(Base):
     unit: Mapped[str] = mapped_column(String(16), default="shares")
 
 
+class OwnershipSnapshot(Base):
+    __tablename__ = "ownership_snapshots"
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "source_id", "snapshot_date", "holder_bucket"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    raw_ingestion_id: Mapped[int | None] = mapped_column(ForeignKey("raw_ingestions.id"))
+    snapshot_date: Mapped[date] = mapped_column(Date)
+    holder_bucket: Mapped[str] = mapped_column(String(64))
+    holder_count: Mapped[int | None] = mapped_column()
+    share_count: Mapped[Decimal | None] = mapped_column(Numeric(30, 4))
+    ownership_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class EstimateSnapshot(Base):
     __tablename__ = "estimate_snapshots"
     __table_args__ = (
@@ -178,6 +197,35 @@ class Event(Base):
     status: Mapped[str] = mapped_column(String(32), default="scheduled")
 
 
+class NewsItem(Base):
+    __tablename__ = "news_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    raw_ingestion_id: Mapped[int | None] = mapped_column(ForeignKey("raw_ingestions.id"))
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    headline: Mapped[str] = mapped_column(Text)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_name: Mapped[str | None] = mapped_column(String(255))
+    source_url: Mapped[str] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(String(64))
+    importance_score: Mapped[float | None] = mapped_column()
+    is_material: Mapped[bool | None] = mapped_column(Boolean)
+    summary: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NewsInstrument(Base):
+    __tablename__ = "news_instruments"
+    news_item_id: Mapped[int] = mapped_column(
+        ForeignKey("news_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    instrument_id: Mapped[int] = mapped_column(
+        ForeignKey("instruments.id", ondelete="CASCADE"), primary_key=True
+    )
+    relevance_score: Mapped[float | None] = mapped_column()
+
+
 class Change(Base):
     __tablename__ = "changes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -185,6 +233,7 @@ class Change(Base):
     category: Mapped[str] = mapped_column(String(32), index=True)
     metric: Mapped[str] = mapped_column(String(64))
     period: Mapped[str | None] = mapped_column(String(32))
+    lookback: Mapped[str | None] = mapped_column(String(32))
     baseline_type: Mapped[str] = mapped_column(String(32))
     previous_value: Mapped[Decimal | None] = mapped_column(Numeric(30, 8))
     current_value: Mapped[Decimal | None] = mapped_column(Numeric(30, 8))
@@ -206,3 +255,66 @@ class Change(Base):
     current_snapshot_type: Mapped[str | None] = mapped_column(String(64))
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class AIInterpretation(Base):
+    __tablename__ = "ai_interpretations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
+    interpretation_type: Mapped[str] = mapped_column(String(32), default="change")
+    summary: Mapped[str] = mapped_column(Text)
+    why_it_matters: Mapped[str | None] = mapped_column(Text)
+    supporting_signals: Mapped[list] = mapped_column(JSONB, default=list)
+    contradictions: Mapped[list] = mapped_column(JSONB, default=list)
+    watch_next: Mapped[list] = mapped_column(JSONB, default=list)
+    thesis_impact: Mapped[str | None] = mapped_column(String(32))
+    model_provider: Mapped[str] = mapped_column(String(64))
+    model_name: Mapped[str] = mapped_column(String(128))
+    prompt_version: Mapped[str] = mapped_column(String(64))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class AIInterpretationChange(Base):
+    __tablename__ = "ai_interpretation_changes"
+    interpretation_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_interpretations.id", ondelete="CASCADE"), primary_key=True
+    )
+    change_id: Mapped[int] = mapped_column(
+        ForeignKey("changes.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class DailyReport(Base):
+    __tablename__ = "daily_reports"
+    __table_args__ = (UniqueConstraint("report_date", "report_type"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    report_type: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    min_score: Mapped[float] = mapped_column(default=85)
+    category: Mapped[str | None] = mapped_column(String(32))
+    market: Mapped[str | None] = mapped_column(String(16))
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AlertDelivery(Base):
+    __tablename__ = "alert_deliveries"
+    __table_args__ = (UniqueConstraint("alert_id", "change_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"))
+    change_id: Mapped[int] = mapped_column(ForeignKey("changes.id", ondelete="CASCADE"))
+    delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    status: Mapped[str] = mapped_column(String(32), default="pending")

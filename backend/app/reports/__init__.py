@@ -1,0 +1,1 @@
+"""Persisted daily report generation."""

@@ -1,7 +1,13 @@
 from decimal import Decimal
+from types import SimpleNamespace
+
+import pytest
 
 from app.changes.comparator import compare
+from app.changes.engine import _rarity
 from app.domain.observations import ChangeCandidate
+from app.jobs.pipeline import _fetch_domain
+from app.providers.fixture import FixtureProvider
 from app.providers.live import _number, _tw_date
 from app.scoring.scorer import score_change, severity
 
@@ -42,3 +48,42 @@ def test_live_provider_number_parser_handles_market_placeholders():
     assert _number("-") is None
     assert _tw_date("20260811").isoformat() == "2026-08-11"
     assert _tw_date("115/08/11").isoformat() == "2026-08-11"
+
+
+@pytest.mark.asyncio
+async def test_fetch_domain_isolates_provider_failure():
+    errors: list[str] = []
+
+    async def failed_fetch() -> list[str]:
+        raise TimeoutError("provider timed out")
+
+    assert await _fetch_domain("flows", failed_fetch, errors) == []
+    assert errors == ["flows: TimeoutError: provider timed out"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_domain_keeps_successful_domain_result():
+    errors: list[str] = []
+
+    async def successful_fetch() -> list[str]:
+        return ["observation"]
+
+    assert await _fetch_domain("prices", successful_fetch, errors) == ["observation"]
+    assert errors == []
+
+
+def test_rarity_uses_historical_adjacent_moves():
+    rows = [SimpleNamespace(value=value) for value in (110, 100, 99, 98)]
+
+    assert _rarity(rows, lambda row: row.value) == 100
+
+
+@pytest.mark.asyncio
+async def test_fixture_provider_loads_ownership_and_news():
+    provider = FixtureProvider()
+
+    ownership = await provider.ownership(["2330"])
+    news = await provider.news(["AMD"])
+
+    assert ownership[0].holder_bucket == "gte_400_lots"
+    assert news[0].external_id == "fixture-amd-20260811-1"

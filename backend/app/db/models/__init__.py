@@ -1,5 +1,10 @@
 from app.db.models.core import (
+    AIInterpretation,
+    AIInterpretationChange,
+    Alert,
+    AlertDelivery,
     Change,
+    DailyReport,
     DataSource,
     EstimateSnapshot,
     Event,
@@ -8,6 +13,9 @@ from app.db.models.core import (
     Instrument,
     InstrumentAlias,
     JobRun,
+    NewsInstrument,
+    NewsItem,
+    OwnershipSnapshot,
     PriceDaily,
     RawIngestion,
     Watchlist,
@@ -15,7 +23,12 @@ from app.db.models.core import (
 )
 
 __all__ = [
+    "AIInterpretation",
+    "AIInterpretationChange",
+    "Alert",
+    "AlertDelivery",
     "Change",
+    "DailyReport",
     "DataSource",
     "EstimateSnapshot",
     "Event",
@@ -24,6 +37,9 @@ __all__ = [
     "Instrument",
     "InstrumentAlias",
     "JobRun",
+    "NewsInstrument",
+    "NewsItem",
+    "OwnershipSnapshot",
     "PriceDaily",
     "RawIngestion",
     "Watchlist",

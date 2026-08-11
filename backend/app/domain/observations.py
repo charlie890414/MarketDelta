@@ -48,6 +48,30 @@ class EventObservation(BaseModel):
     source_url: str | None = None
 
 
+class OwnershipObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    symbol: str
+    snapshot_date: date
+    holder_bucket: str
+    holder_count: int | None = None
+    share_count: Decimal | None = None
+    ownership_pct: Decimal | None = None
+
+
+class NewsObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    symbol: str | None
+    external_id: str | None
+    headline: str
+    published_at: datetime
+    source_name: str | None
+    source_url: str
+    category: str | None = None
+    importance_score: float | None = None
+    is_material: bool | None = None
+    summary: str | None = None
+
+
 class ChangeCandidate(BaseModel):
     symbol: str
     market: str

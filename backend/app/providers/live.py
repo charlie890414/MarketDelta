@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from hashlib import sha1
 
 import httpx
 
@@ -10,6 +11,8 @@ from app.domain.observations import (
     EventObservation,
     FlowObservation,
     FundamentalObservation,
+    NewsObservation,
+    OwnershipObservation,
     PriceObservation,
 )
 
@@ -155,6 +158,58 @@ class LiveProvider:
     async def events(self, symbols: Sequence[str]) -> list[EventObservation]:
         # Event sources have provider-specific calendars; return no guessed events.
         return []
+
+    async def ownership(self, symbols: Sequence[str]) -> list[OwnershipObservation]:
+        return []
+
+    async def news(self, symbols: Sequence[str]) -> list[NewsObservation]:
+        if not self.settings.alpha_vantage_api_key:
+            return []
+        results: list[NewsObservation] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": "NEWS_SENTIMENT",
+                    "tickers": ",".join(symbols),
+                    "limit": 100,
+                    "apikey": self.settings.alpha_vantage_api_key,
+                },
+            )
+            response.raise_for_status()
+            for item in response.json().get("feed", []):
+                headline = str(item.get("title", "")).strip()
+                url = str(item.get("url", "")).strip()
+                published = str(item.get("time_published", ""))
+                if not headline or not url or len(published) < 15:
+                    continue
+                try:
+                    published_at = datetime.strptime(published[:15], "%Y%m%dT%H%M%S").replace(
+                        tzinfo=UTC
+                    )
+                except ValueError:
+                    continue
+                tickers = {
+                    str(entry.get("ticker", "")).upper()
+                    for entry in item.get("ticker_sentiment", [])
+                }
+                matched = next((symbol for symbol in symbols if symbol.upper() in tickers), None)
+                sentiment = _number(item.get("overall_sentiment_score"))
+                results.append(
+                    NewsObservation(
+                        symbol=matched,
+                        external_id=sha1(url.encode(), usedforsecurity=False).hexdigest(),
+                        headline=headline,
+                        published_at=published_at,
+                        source_name=item.get("source"),
+                        source_url=url,
+                        category=(item.get("topics") or [{}])[0].get("topic"),
+                        importance_score=float(abs(sentiment or 0) * 100),
+                        is_material=abs(sentiment or 0) >= Decimal("0.35"),
+                        summary=item.get("summary"),
+                    )
+                )
+        return results
 
     async def fundamentals(self, symbols: Sequence[str]) -> list[FundamentalObservation]:
         results: list[FundamentalObservation] = []

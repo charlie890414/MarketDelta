@@ -29,8 +29,19 @@ The system boundary is intentionally deterministic:
 source → raw ingestion → normalized snapshot → diff → score → API/UI
 ```
 
-LLM interpretation is deferred until the objective pipeline is stable.
+The current interpretation endpoint provides a persisted structured deterministic
+fallback (`POST /companies/{symbol}/interpretations/generate`). External LLM
+providers can be added without changing objective change fields.
 
 To use the HTTP adapters instead of fixtures, set `MCE_USE_LIVE=true` and provide
 `ALPHA_VANTAGE_API_KEY`. TWSE price collection does not require a key; Alpha
 Vantage availability depends on the account's endpoint quota/entitlements.
+
+Additional runtime settings:
+
+- `PIPELINE_INTERVAL_HOURS`: scheduler interval, default `6`.
+- `PIPELINE_RUN_ON_START`: run the fixture/live pipeline immediately at scheduler startup, default `true`.
+
+Useful API groups include `/changes`, `/companies/{symbol}/news`,
+`/companies/{symbol}/ownership`, `/companies/{symbol}/interpretations`,
+`/reports/daily`, `/watchlists`, and `/alerts`.

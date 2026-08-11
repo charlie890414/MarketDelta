@@ -1,34 +1,53 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.alerts.service import evaluate_alerts
 from app.api.schemas import (
+    AIInterpretationResponse,
+    AlertCreate,
+    AlertDeliveryResponse,
+    AlertResponse,
     ChangeResponse,
+    DailyReportResponse,
     EventResponse,
     HistoryPoint,
     InstrumentResponse,
     JobResponse,
+    NewsResponse,
+    OwnershipResponse,
     WatchlistCreate,
     WatchlistItemCreate,
     WatchlistItemResponse,
     WatchlistResponse,
+    WatchlistUpdate,
 )
 from app.db.models import (
+    AIInterpretation,
+    Alert,
+    AlertDelivery,
     Change,
+    DailyReport,
     DataSource,
     EstimateSnapshot,
     Event,
     FlowDaily,
     FundamentalSnapshot,
     Instrument,
+    InstrumentAlias,
     JobRun,
+    NewsInstrument,
+    NewsItem,
+    OwnershipSnapshot,
     PriceDaily,
     Watchlist,
     WatchlistItem,
 )
 from app.db.session import get_db
+from app.interpretation.service import generate_interpretation
+from app.reports.daily import generate_daily_reports
 
 router = APIRouter()
 
@@ -75,6 +94,7 @@ def list_changes(
             category=change.category,
             metric=change.metric,
             period=change.period,
+            lookback=change.lookback,
             previous_value=change.previous_value,
             current_value=change.current_value,
             absolute_change=change.absolute_change,
@@ -100,6 +120,31 @@ def list_companies(db: Session = Depends(get_db)):
             select(Instrument).where(Instrument.is_active.is_(True)).order_by(Instrument.symbol)
         )
     )
+
+
+@router.get("/companies/search", response_model=list[InstrumentResponse])
+def search_companies(
+    q: str = Query(min_length=1, max_length=255),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    pattern = f"%{q.strip().lower()}%"
+    rows = db.scalars(
+        select(Instrument)
+        .outerjoin(InstrumentAlias, InstrumentAlias.instrument_id == Instrument.id)
+        .where(
+            Instrument.is_active.is_(True),
+            or_(
+                func.lower(Instrument.symbol).like(pattern),
+                func.lower(Instrument.company_name).like(pattern),
+                func.lower(InstrumentAlias.alias).like(pattern),
+            ),
+        )
+        .distinct()
+        .order_by(Instrument.symbol)
+        .limit(limit)
+    )
+    return list(rows)
 
 
 @router.get("/companies/{symbol}", response_model=InstrumentResponse)
@@ -131,6 +176,7 @@ def company_changes(symbol: str, db: Session = Depends(get_db)):
             category=change.category,
             metric=change.metric,
             period=change.period,
+            lookback=change.lookback,
             previous_value=change.previous_value,
             current_value=change.current_value,
             absolute_change=change.absolute_change,
@@ -230,6 +276,25 @@ def list_events(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_d
     ]
 
 
+@router.get("/reports/daily", response_model=list[DailyReportResponse])
+def list_daily_reports(
+    report_type: str | None = None,
+    limit: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    query = select(DailyReport).order_by(desc(DailyReport.report_date), desc(DailyReport.created_at))
+    if report_type:
+        query = query.where(DailyReport.report_type == report_type)
+    return list(db.scalars(query.limit(limit)))
+
+
+@router.post("/reports/daily/generate", response_model=list[DailyReportResponse])
+def generate_reports(db: Session = Depends(get_db)):
+    reports = generate_daily_reports(db)
+    db.commit()
+    return reports
+
+
 @router.get("/companies/{symbol}/events", response_model=list[EventResponse])
 def company_events(symbol: str, db: Session = Depends(get_db)):
     instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
@@ -252,6 +317,122 @@ def company_events(symbol: str, db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/news", response_model=list[NewsResponse])
+def list_news(
+    days: int = Query(7, ge=1, le=365),
+    category: str | None = None,
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    query = select(NewsItem).where(
+        NewsItem.published_at >= datetime.now(UTC) - timedelta(days=days)
+    )
+    if category:
+        query = query.where(NewsItem.category == category)
+    return list(db.scalars(query.order_by(desc(NewsItem.published_at)).limit(limit)))
+
+
+@router.get("/companies/{symbol}/news", response_model=list[NewsResponse])
+def company_news(symbol: str, db: Session = Depends(get_db)):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    rows = db.execute(
+        select(NewsItem)
+        .join(NewsInstrument, NewsInstrument.news_item_id == NewsItem.id)
+        .where(NewsInstrument.instrument_id == instrument.id)
+        .order_by(desc(NewsItem.published_at))
+        .limit(100)
+    )
+    return list(rows.scalars())
+
+
+@router.get("/companies/{symbol}/ownership", response_model=list[OwnershipResponse])
+def company_ownership(symbol: str, db: Session = Depends(get_db)):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    rows = db.scalars(
+        select(OwnershipSnapshot)
+        .where(OwnershipSnapshot.instrument_id == instrument.id)
+        .order_by(desc(OwnershipSnapshot.snapshot_date))
+        .limit(200)
+    )
+    return [
+        OwnershipResponse(
+            id=row.id,
+            symbol=instrument.symbol,
+            snapshot_date=row.snapshot_date,
+            holder_bucket=row.holder_bucket,
+            holder_count=row.holder_count,
+            share_count=row.share_count,
+            ownership_pct=row.ownership_pct,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/companies/{symbol}/interpretations", response_model=list[AIInterpretationResponse])
+def company_interpretations(symbol: str, db: Session = Depends(get_db)):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    rows = db.scalars(
+        select(AIInterpretation)
+        .where(AIInterpretation.instrument_id == instrument.id)
+        .order_by(desc(AIInterpretation.generated_at))
+        .limit(100)
+    )
+    return [
+        AIInterpretationResponse(
+            id=row.id,
+            symbol=instrument.symbol,
+            interpretation_type=row.interpretation_type,
+            summary=row.summary,
+            why_it_matters=row.why_it_matters,
+            supporting_signals=row.supporting_signals,
+            contradictions=row.contradictions,
+            watch_next=row.watch_next,
+            thesis_impact=row.thesis_impact,
+            model_provider=row.model_provider,
+            model_name=row.model_name,
+            prompt_version=row.prompt_version,
+            generated_at=row.generated_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/companies/{symbol}/interpretations/generate",
+    response_model=AIInterpretationResponse,
+    status_code=201,
+)
+def generate_company_interpretation(symbol: str, db: Session = Depends(get_db)):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    interpretation = generate_interpretation(db, instrument)
+    if not interpretation:
+        raise HTTPException(409, "No material changes available for interpretation")
+    db.commit()
+    return AIInterpretationResponse(
+        id=interpretation.id,
+        symbol=instrument.symbol,
+        interpretation_type=interpretation.interpretation_type,
+        summary=interpretation.summary,
+        why_it_matters=interpretation.why_it_matters,
+        supporting_signals=interpretation.supporting_signals,
+        contradictions=interpretation.contradictions,
+        watch_next=interpretation.watch_next,
+        thesis_impact=interpretation.thesis_impact,
+        model_provider=interpretation.model_provider,
+        model_name=interpretation.model_name,
+        prompt_version=interpretation.prompt_version,
+        generated_at=interpretation.generated_at,
+    )
+
+
 @router.get("/watchlists", response_model=list[WatchlistResponse])
 def list_watchlists(db: Session = Depends(get_db)):
     return list(db.scalars(select(Watchlist).order_by(Watchlist.name)))
@@ -264,6 +445,37 @@ def create_watchlist(payload: WatchlistCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.get("/watchlists/{watchlist_id}", response_model=WatchlistResponse)
+def get_watchlist(watchlist_id: int, db: Session = Depends(get_db)):
+    item = db.scalar(select(Watchlist).where(Watchlist.id == watchlist_id))
+    if not item:
+        raise HTTPException(404, "Watchlist not found")
+    return item
+
+
+@router.patch("/watchlists/{watchlist_id}", response_model=WatchlistResponse)
+def update_watchlist(
+    watchlist_id: int, payload: WatchlistUpdate, db: Session = Depends(get_db)
+):
+    item = db.scalar(select(Watchlist).where(Watchlist.id == watchlist_id))
+    if not item:
+        raise HTTPException(404, "Watchlist not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(item, key, value)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/watchlists/{watchlist_id}", status_code=204)
+def delete_watchlist(watchlist_id: int, db: Session = Depends(get_db)):
+    item = db.scalar(select(Watchlist).where(Watchlist.id == watchlist_id))
+    if not item:
+        raise HTTPException(404, "Watchlist not found")
+    db.delete(item)
+    db.commit()
 
 
 @router.get("/watchlists/{watchlist_id}/items", response_model=list[WatchlistItemResponse])
@@ -340,6 +552,36 @@ def remove_watchlist_item(watchlist_id: int, instrument_id: int, db: Session = D
 @router.get("/jobs", response_model=list[JobResponse])
 def list_jobs(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     return list(db.scalars(select(JobRun).order_by(desc(JobRun.started_at)).limit(limit)))
+
+
+@router.get("/alerts", response_model=list[AlertResponse])
+def list_alerts(db: Session = Depends(get_db)):
+    return list(db.scalars(select(Alert).order_by(Alert.name)))
+
+
+@router.post("/alerts", response_model=AlertResponse, status_code=201)
+def create_alert(payload: AlertCreate, db: Session = Depends(get_db)):
+    values = payload.model_dump()
+    values["market"] = payload.market.upper() if payload.market else None
+    alert = Alert(**values)
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+@router.get("/alerts/deliveries", response_model=list[AlertDeliveryResponse])
+def list_alert_deliveries(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    return list(
+        db.scalars(select(AlertDelivery).order_by(desc(AlertDelivery.delivered_at)).limit(limit))
+    )
+
+
+@router.post("/alerts/evaluate", response_model=list[AlertDeliveryResponse])
+def evaluate_alert_deliveries(db: Session = Depends(get_db)):
+    deliveries = evaluate_alerts(db)
+    db.commit()
+    return deliveries
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)

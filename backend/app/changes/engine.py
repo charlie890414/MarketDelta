@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+from decimal import Decimal
+from itertools import pairwise
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +35,8 @@ def _make_change(
     period: str | None,
     source: DataSource | None,
     snapshot_type: str,
+    lookback: str = "previous",
+    rarity: float = 50,
     change_type: str = "changed",
 ) -> Change | None:
     current_value = (
@@ -66,7 +70,7 @@ def _make_change(
         percentage_change=pct,
         direction=direction,
         change_type=change_type,
-        baseline_type="previous",
+        baseline_type=lookback,
     )
     observed_at = current.observed_at if hasattr(current, "observed_at") else datetime.combine(
         current.trading_date, datetime.min.time(), tzinfo=UTC
@@ -74,7 +78,7 @@ def _make_change(
     age_days = max((datetime.now(UTC) - observed_at).total_seconds() / 86400, 0)
     scores = score_change(
         candidate,
-        rarity=50,
+        rarity=rarity,
         freshness=max(0, min(100, 100 - age_days * 10)),
         source_quality=_source_quality(source),
     )
@@ -83,7 +87,8 @@ def _make_change(
         category=category,
         metric=metric,
         period=period,
-        baseline_type="previous",
+        baseline_type=lookback,
+        lookback=lookback,
         previous_value=previous_value,
         current_value=current_value,
         absolute_change=absolute,
@@ -115,16 +120,53 @@ def _latest_pair(db: Session, model, instrument_id: int, *keys: str):
     return list(db.scalars(query.order_by(date_column.desc()).limit(2)))
 
 
+def _rarity(rows, value_getter) -> float:
+    """Return the percentile of the latest move among historical adjacent moves."""
+    if len(rows) < 3:
+        return 50
+    moves: list[float] = []
+    for current, previous in pairwise(rows):
+        current_value = Decimal(str(value_getter(current)))
+        previous_value = Decimal(str(value_getter(previous)))
+        if previous_value == 0:
+            continue
+        moves.append(float(abs((current_value - previous_value) / previous_value) * 100))
+    if not moves:
+        return 50
+    latest = moves[0]
+    return round(sum(move <= latest for move in moves) / len(moves) * 100, 2)
+
+
 def detect_price_changes(db: Session, instrument: Instrument) -> list[Change]:
-    rows = _latest_pair(db, PriceDaily, instrument.id)
+    rows = list(
+        db.scalars(
+            select(PriceDaily)
+            .where(PriceDaily.instrument_id == instrument.id)
+            .order_by(PriceDaily.trading_date.desc())
+        )
+    )
     if len(rows) < 2:
         return []
     source = db.get(DataSource, rows[0].source_id)
-    change = _make_change(
-        instrument, rows[0], rows[1], category="price", metric="close", period="1d",
-        source=source, snapshot_type="price_daily",
-    )
-    return [change] if change else []
+    changes = []
+    for lookback, index in (("previous", 1), ("5d", 5), ("20d", 20)):
+        if len(rows) <= index:
+            continue
+        change = _make_change(
+            instrument,
+            rows[0],
+            rows[index],
+            category="price",
+            metric="close",
+            period=lookback,
+            source=source,
+            snapshot_type="price_daily",
+            lookback=lookback,
+            rarity=_rarity(rows, lambda row: row.close),
+        )
+        if change:
+            changes.append(change)
+    return changes
 
 
 def detect_estimate_changes(db: Session, instrument: Instrument) -> list[Change]:
@@ -145,7 +187,10 @@ def detect_estimate_changes(db: Session, instrument: Instrument) -> list[Change]
         source = db.get(DataSource, pair[0].source_id)
         change = _make_change(
             instrument, pair[0], pair[1], category="expectation", metric=pair[0].metric,
-            period=pair[0].fiscal_period_label, source=source, snapshot_type="estimate_snapshots",
+            period=pair[0].fiscal_period_label,
+            source=source,
+            snapshot_type="estimate_snapshots",
+            rarity=_rarity(pair, lambda row: row.value),
         )
         if change:
             changes.append(change)
@@ -170,7 +215,10 @@ def detect_fundamental_changes(db: Session, instrument: Instrument) -> list[Chan
         source = db.get(DataSource, pair[0].source_id)
         change = _make_change(
             instrument, pair[0], pair[1], category="fundamental", metric=pair[0].metric,
-            period=pair[0].period_label, source=source, snapshot_type="fundamentals",
+            period=pair[0].period_label,
+            source=source,
+            snapshot_type="fundamentals",
+            rarity=_rarity(pair, lambda row: row.value),
         )
         if change:
             changes.append(change)
@@ -193,10 +241,21 @@ def detect_flow_changes(db: Session, instrument: Instrument) -> list[Change]:
         if len(pair) < 2:
             continue
         source = db.get(DataSource, pair[0].source_id)
-        change = _make_change(
-            instrument, pair[0], pair[1], category="flow", metric=pair[0].flow_type,
-            period="1d", source=source, snapshot_type="flow_daily",
-        )
-        if change:
-            changes.append(change)
+        for lookback, index in (("previous", 1), ("5d", 5), ("20d", 20)):
+            if len(pair) <= index:
+                continue
+            change = _make_change(
+                instrument,
+                pair[0],
+                pair[index],
+                category="flow",
+                metric=pair[0].flow_type,
+                period=lookback,
+                source=source,
+                snapshot_type="flow_daily",
+                lookback=lookback,
+                rarity=_rarity(pair, lambda row: row.net_volume),
+            )
+            if change:
+                changes.append(change)
     return changes

@@ -5,8 +5,27 @@ const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const client = createClient<paths>({ baseUrl: base });
 export type Change = paths["/changes"]["get"]["responses"][200]["content"]["application/json"][number];
 
-export async function getChanges(filters: { market?: string; category?: string } = {}): Promise<Change[]> {
-  const { data, error } = await client.GET("/changes", { params: { query: { min_score: 0, hours: 8760, limit: 100, market: filters.market, category: filters.category } } });
+export async function getChanges(
+  filters: {
+    market?: string;
+    category?: string;
+    severity?: string;
+    minScore?: number;
+    hours?: number;
+  } = {},
+): Promise<Change[]> {
+  const { data, error } = await client.GET("/changes", {
+    params: {
+      query: {
+        min_score: filters.minScore ?? 50,
+        hours: filters.hours ?? 24,
+        limit: 100,
+        market: filters.market,
+        category: filters.category,
+        severity: filters.severity,
+      },
+    },
+  });
   if (error || !data) throw new Error("Change feed unavailable");
   return data;
 }
@@ -50,5 +69,99 @@ export async function getJobs() {
 export async function getEvents() {
   const { data, error } = await client.GET("/events", { params: { query: { days: 30 } } });
   if (error || !data) throw new Error("Events unavailable");
+  return data;
+}
+
+export async function searchCompanies(q: string) {
+  const { data, error } = await client.GET("/companies/search", { params: { query: { q, limit: 20 } } });
+  if (error || !data) throw new Error("Company search unavailable");
+  return data;
+}
+
+export async function getDailyReports(reportType?: string) {
+  const { data, error } = await client.GET("/reports/daily", {
+    params: { query: { report_type: reportType, limit: 30 } },
+  });
+  if (error || !data) throw new Error("Daily reports unavailable");
+  return data;
+}
+
+export async function createWatchlist(name: string, description?: string) {
+  const { data, error } = await client.POST("/watchlists", {
+    body: { name, description },
+  });
+  if (error || !data) throw new Error("Watchlist creation failed");
+  return data;
+}
+
+export async function updateWatchlist(watchlistId: number, body: { name?: string; description?: string }) {
+  const { data, error } = await client.PATCH("/watchlists/{watchlist_id}", {
+    params: { path: { watchlist_id: watchlistId } },
+    body,
+  });
+  if (error || !data) throw new Error("Watchlist update failed");
+  return data;
+}
+
+export async function deleteWatchlist(watchlistId: number) {
+  const { error } = await client.DELETE("/watchlists/{watchlist_id}", {
+    params: { path: { watchlist_id: watchlistId } },
+  });
+  if (error) throw new Error("Watchlist deletion failed");
+}
+
+export async function addWatchlistItem(watchlistId: number, symbol: string, priority = 0) {
+  const { data, error } = await client.POST("/watchlists/{watchlist_id}/items", {
+    params: { path: { watchlist_id: watchlistId } },
+    body: { symbol, priority },
+  });
+  if (error || !data) throw new Error("Watchlist item creation failed");
+  return data;
+}
+
+export async function removeWatchlistItem(watchlistId: number, instrumentId: number) {
+  const { error } = await client.DELETE("/watchlists/{watchlist_id}/items/{instrument_id}", {
+    params: { path: { watchlist_id: watchlistId, instrument_id: instrumentId } },
+  });
+  if (error) throw new Error("Watchlist item removal failed");
+}
+
+export async function getNews(category?: string) {
+  const { data, error } = await client.GET("/news", {
+    params: { query: { days: 7, category, limit: 100 } },
+  });
+  if (error || !data) throw new Error("News unavailable");
+  return data;
+}
+
+export async function getCompanyInterpretations(symbol: string) {
+  const { data, error } = await client.GET("/companies/{symbol}/interpretations", {
+    params: { path: { symbol } },
+  });
+  if (error || !data) throw new Error("Interpretations unavailable");
+  return data;
+}
+
+export async function getCompanyNews(symbol: string) {
+  const { data, error } = await client.GET("/companies/{symbol}/news", {
+    params: { path: { symbol } },
+  });
+  if (error || !data) throw new Error("Company news unavailable");
+  return data;
+}
+
+export async function getCompanyOwnership(symbol: string) {
+  const { data, error } = await client.GET("/companies/{symbol}/ownership", {
+    params: { path: { symbol } },
+  });
+  if (error || !data) throw new Error("Ownership unavailable");
+  return data;
+}
+
+export async function generateCompanyInterpretation(symbol: string) {
+  const { data, error } = await client.POST("/companies/{symbol}/interpretations/generate", {
+    params: { path: { symbol } },
+  });
+  if (error || !data) throw new Error("Interpretation generation failed");
   return data;
 }

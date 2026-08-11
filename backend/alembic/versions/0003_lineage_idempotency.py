@@ -11,28 +11,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "flow_daily",
-        sa.Column("raw_ingestion_id", sa.BigInteger(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_flow_daily_raw_ingestion_id",
-        "flow_daily",
-        "raw_ingestions",
-        ["raw_ingestion_id"],
-        ["id"],
-    )
-    op.add_column(
-        "fundamentals",
-        sa.Column("raw_ingestion_id", sa.BigInteger(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_fundamentals_raw_ingestion_id",
-        "fundamentals",
-        "raw_ingestions",
-        ["raw_ingestion_id"],
-        ["id"],
-    )
+    inspector = sa.inspect(op.get_bind())
+    for table in ("flow_daily", "fundamentals"):
+        columns = {column["name"] for column in inspector.get_columns(table)}
+        if "raw_ingestion_id" not in columns:
+            op.add_column(table, sa.Column("raw_ingestion_id", sa.BigInteger(), nullable=True))
+            op.create_foreign_key(
+                f"fk_{table}_raw_ingestion_id",
+                table,
+                "raw_ingestions",
+                ["raw_ingestion_id"],
+                ["id"],
+            )
     op.add_column("changes", sa.Column("previous_snapshot_type", sa.String(64)))
     op.add_column("changes", sa.Column("current_snapshot_type", sa.String(64)))
     op.execute(
@@ -84,7 +74,3 @@ def downgrade() -> None:
     op.drop_constraint("uq_flow_daily_logical", "flow_daily", type_="unique")
     op.drop_column("changes", "current_snapshot_type")
     op.drop_column("changes", "previous_snapshot_type")
-    op.drop_constraint("fk_fundamentals_raw_ingestion_id", "fundamentals", type_="foreignkey")
-    op.drop_column("fundamentals", "raw_ingestion_id")
-    op.drop_constraint("fk_flow_daily_raw_ingestion_id", "flow_daily", type_="foreignkey")
-    op.drop_column("flow_daily", "raw_ingestion_id")

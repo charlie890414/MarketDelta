@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
     mce_use_live: bool = False
+    pipeline_interval_hours: int = 6
+    pipeline_run_on_start: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
