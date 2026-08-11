@@ -1,4 +1,6 @@
 [
+  {"symbol":"2330","trading_date":"2026-08-10","flow_type":"foreign_investor","net_volume":"-500000"},
   {"symbol":"2330","trading_date":"2026-08-11","flow_type":"foreign_investor","net_volume":"1250000"},
+  {"symbol":"2330","trading_date":"2026-08-10","flow_type":"investment_trust","net_volume":"200000"},
   {"symbol":"2330","trading_date":"2026-08-11","flow_type":"investment_trust","net_volume":"180000"}
 ]

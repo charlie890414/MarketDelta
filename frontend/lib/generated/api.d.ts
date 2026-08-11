@@ -261,6 +261,16 @@ export interface components {
             severity: string;
             /** Total Score */
             total_score: number;
+            /** Source Code */
+            source_code: string | null;
+            /** Source Name */
+            source_name: string | null;
+            /** Source Confidence */
+            source_confidence: string | null;
+            /** Previous Snapshot Type */
+            previous_snapshot_type: string | null;
+            /** Current Snapshot Type */
+            current_snapshot_type: string | null;
             /**
              * Detected At
              * Format: date-time

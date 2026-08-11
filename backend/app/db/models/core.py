@@ -117,9 +117,13 @@ class PriceDaily(Base):
 
 class FlowDaily(Base):
     __tablename__ = "flow_daily"
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "source_id", "trading_date", "flow_type"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    raw_ingestion_id: Mapped[int | None] = mapped_column(ForeignKey("raw_ingestions.id"))
     trading_date: Mapped[date] = mapped_column(Date)
     flow_type: Mapped[str] = mapped_column(String(32))
     net_volume: Mapped[Decimal] = mapped_column(Numeric(30, 4))
@@ -146,9 +150,15 @@ class EstimateSnapshot(Base):
 
 class FundamentalSnapshot(Base):
     __tablename__ = "fundamentals"
+    __table_args__ = (
+        UniqueConstraint(
+            "instrument_id", "source_id", "metric", "period_label", "observed_at"
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    raw_ingestion_id: Mapped[int | None] = mapped_column(ForeignKey("raw_ingestions.id"))
     metric: Mapped[str] = mapped_column(String(64))
     period_label: Mapped[str] = mapped_column(String(32))
     value: Mapped[Decimal] = mapped_column(Numeric(30, 8))
@@ -192,5 +202,7 @@ class Change(Base):
     source_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
     previous_snapshot_id: Mapped[int | None] = mapped_column()
     current_snapshot_id: Mapped[int | None] = mapped_column()
+    previous_snapshot_type: Mapped[str | None] = mapped_column(String(64))
+    current_snapshot_type: Mapped[str | None] = mapped_column(String(64))
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)

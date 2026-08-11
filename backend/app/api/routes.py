@@ -17,6 +17,7 @@ from app.api.schemas import (
 )
 from app.db.models import (
     Change,
+    DataSource,
     EstimateSnapshot,
     Event,
     FlowDaily,
@@ -49,8 +50,9 @@ def list_changes(
     db: Session = Depends(get_db),
 ):
     query = (
-        select(Change, Instrument)
+        select(Change, Instrument, DataSource)
         .join(Instrument, Instrument.id == Change.instrument_id)
+        .outerjoin(DataSource, DataSource.id == Change.source_id)
         .where(
             Change.total_score >= min_score,
             Change.detected_at >= datetime.now(UTC) - timedelta(hours=hours),
@@ -80,9 +82,14 @@ def list_changes(
             direction=change.direction,
             severity=change.severity,
             total_score=change.total_score,
+            source_code=source.code if source else None,
+            source_name=source.name if source else None,
+            source_confidence=source.confidence if source else None,
+            previous_snapshot_type=change.previous_snapshot_type,
+            current_snapshot_type=change.current_snapshot_type,
             detected_at=change.detected_at,
         )
-        for change, instrument in db.execute(query)
+        for change, instrument, source in db.execute(query)
     ]
 
 
@@ -108,8 +115,9 @@ def company_changes(symbol: str, db: Session = Depends(get_db)):
     instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
     if not instrument:
         raise HTTPException(404, "Company not found")
-    changes = db.scalars(
-        select(Change)
+    changes = db.execute(
+        select(Change, DataSource)
+        .outerjoin(DataSource, DataSource.id == Change.source_id)
         .where(Change.instrument_id == instrument.id)
         .order_by(desc(Change.detected_at))
         .limit(200)
@@ -130,9 +138,14 @@ def company_changes(symbol: str, db: Session = Depends(get_db)):
             direction=change.direction,
             severity=change.severity,
             total_score=change.total_score,
+            source_code=source.code if source else None,
+            source_name=source.name if source else None,
+            source_confidence=source.confidence if source else None,
+            previous_snapshot_type=change.previous_snapshot_type,
+            current_snapshot_type=change.current_snapshot_type,
             detected_at=change.detected_at,
         )
-        for change in changes
+        for change, source in changes
     ]
 
 

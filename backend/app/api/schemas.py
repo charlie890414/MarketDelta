@@ -20,6 +20,11 @@ class ChangeResponse(BaseModel):
     direction: str
     severity: str
     total_score: float
+    source_code: str | None
+    source_name: str | None
+    source_confidence: str | None
+    previous_snapshot_type: str | None
+    current_snapshot_type: str | None
     detected_at: datetime
 
 

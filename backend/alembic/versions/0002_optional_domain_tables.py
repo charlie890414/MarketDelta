@@ -1,6 +1,7 @@
 """Add domain tables omitted by older local databases."""
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0002_domain_tables"
 down_revision = "0001_initial"
@@ -20,5 +21,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    for table in ("events", "flow_daily", "fundamentals"):
-        op.drop_table(table)
+    # These tables are part of 0001 on fresh databases. The compatibility
+    # upgrade must never remove them when rolling back this no-op migration.
+    pass

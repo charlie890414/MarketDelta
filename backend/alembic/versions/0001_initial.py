@@ -1,6 +1,24 @@
 """initial market changes schema"""
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import (
+    Column as SAColumn,
+)
+
 from alembic import op
-from sqlalchemy import BigInteger, Boolean, Column as SAColumn, Date, DateTime, Float, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
+
 
 # Keep the migration compact while using SQLAlchemy constructs with Alembic.
 def Column(name, *args, **kwargs):
