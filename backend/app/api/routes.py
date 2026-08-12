@@ -49,6 +49,7 @@ from app.db.models import (
     WatchlistItem,
 )
 from app.db.session import get_db
+from app.instruments.registry import lookup_twse_company
 from app.interpretation.service import generate_interpretation
 from app.reports.daily import generate_daily_reports
 
@@ -174,11 +175,18 @@ def create_company(payload: InstrumentCreate, db: Session = Depends(get_db)):
     if db.scalar(select(Instrument).where(Instrument.market == payload.market, Instrument.symbol == symbol)):
         raise HTTPException(409, "Company already exists")
 
+    official_profile = lookup_twse_company(symbol) if payload.market == "TW" else None
+    company_name = (payload.company_name or "").strip() or (
+        official_profile[0] if official_profile else symbol
+    )
+    exchange = (payload.exchange or "").strip().upper() or (
+        official_profile[1] if official_profile else None
+    )
     instrument = Instrument(
         symbol=symbol,
         market=payload.market,
-        exchange=(payload.exchange or "").strip().upper() or None,
-        company_name=(payload.company_name or "").strip() or symbol,
+        exchange=exchange,
+        company_name=company_name,
         currency="TWD" if payload.market == "TW" else "USD",
     )
     db.add(instrument)
@@ -194,7 +202,8 @@ def search_companies(
     db: Session = Depends(get_db),
 ):
     pattern = f"%{q.strip().lower()}%"
-    rows = db.scalars(
+    rows = list(
+        db.scalars(
         select(Instrument)
         .outerjoin(InstrumentAlias, InstrumentAlias.instrument_id == Instrument.id)
         .where(
@@ -208,8 +217,27 @@ def search_companies(
         .distinct()
         .order_by(Instrument.symbol)
         .limit(limit)
+        )
     )
-    return list(rows)
+    query = q.strip()
+    if rows or not (query.isdigit() and len(query) in (4, 6)):
+        return rows
+
+    official_profile = lookup_twse_company(query)
+    if not official_profile:
+        return rows
+    company_name, exchange = official_profile
+    instrument = Instrument(
+        symbol=query,
+        market="TW",
+        exchange=exchange,
+        company_name=company_name,
+        currency="TWD",
+    )
+    db.add(instrument)
+    db.commit()
+    db.refresh(instrument)
+    return [instrument]
 
 
 @router.get("/companies/{symbol}", response_model=InstrumentResponse)
