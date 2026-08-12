@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getAlertDeliveries, getChanges, getDailyReports, type Change } from "../../lib/api";
+import { getAlertDeliveries, getChanges, getDailyReports, getWatchlists, type Change } from "../../lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +17,12 @@ function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function filterHref(market?: string, category?: string, severity?: string) {
+function filterHref(market?: string, category?: string, severity?: string, watchlistId?: string) {
   const params = new URLSearchParams();
   if (market) params.set("market", market);
   if (category) params.set("category", category);
   if (severity) params.set("severity", severity);
+  if (watchlistId) params.set("watchlist_id", watchlistId);
   const query = params.toString();
   return query ? `/dashboard?${query}` : "/dashboard";
 }
@@ -31,25 +32,33 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   const market = first(params.market);
   const category = first(params.category);
   const severity = first(params.severity);
+  const watchlistId = first(params.watchlist_id);
   let changes = [] as Awaited<ReturnType<typeof getChanges>>;
   let reports = [] as Awaited<ReturnType<typeof getDailyReports>>;
   let deliveries = [] as Awaited<ReturnType<typeof getAlertDeliveries>>;
-  const [changeResult, reportResult, deliveryResult] = await Promise.allSettled([
-    getChanges({ market, category, severity }),
+  const [changeResult, reportResult, deliveryResult, watchlistResult] = await Promise.allSettled([
+    getChanges({ market, category, severity, watchlistId: watchlistId ? Number(watchlistId) : undefined }),
     getDailyReports("market"),
     getAlertDeliveries(),
   ]);
   if (changeResult.status === "fulfilled") changes = changeResult.value;
   if (reportResult.status === "fulfilled") reports = reportResult.value;
   if (deliveryResult.status === "fulfilled") deliveries = deliveryResult.value;
+  const watchlists = watchlistResult.status === "fulfilled" ? watchlistResult.value : [];
 
   const filters = [
-    ["ALL SIGNALS", filterHref(), !market && !category],
+    ["ALL SIGNALS", filterHref(), !market && !category && !severity && !watchlistId],
     ["US", filterHref("US"), market === "US"],
     ["TAIWAN", filterHref("TW"), market === "TW"],
     ["EXPECTATIONS", filterHref(undefined, "expectation"), category === "expectation"],
+    ["PRICE", filterHref(undefined, "price"), category === "price"],
+    ["FUNDAMENTAL", filterHref(undefined, "fundamental"), category === "fundamental"],
+    ["FLOW", filterHref(undefined, "flow"), category === "flow"],
+    ["NEWS", filterHref(undefined, "news"), category === "news"],
+    ["CATALYST", filterHref(undefined, "event"), category === "event"],
     ["IMPORTANT", filterHref(undefined, undefined, "important"), severity === "important"],
     ["CRITICAL", filterHref(undefined, undefined, "critical"), severity === "critical"],
+    ...watchlists.map((watchlist) => [watchlist.name.toUpperCase(), filterHref(undefined, undefined, undefined, String(watchlist.id)), watchlistId === String(watchlist.id)] as const),
   ] as const;
   const date = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",

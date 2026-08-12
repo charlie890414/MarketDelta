@@ -91,6 +91,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         mops = db.scalar(select(DataSource).where(DataSource.code == "mops")) or twse
         tdcc = db.scalar(select(DataSource).where(DataSource.code == "tdcc")) or twse
         sec = db.scalar(select(DataSource).where(DataSource.code == "sec")) or alpha
+        stooq = db.scalar(select(DataSource).where(DataSource.code == "stooq")) or alpha
         if not twse or not alpha:
             job.status = "failed"
             job.finished_at = datetime.now(UTC)
@@ -118,7 +119,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             instrument = _instrument(db, observation.symbol)
             if not instrument:
                 continue
-            source = twse if instrument.market == "TW" else alpha
+            source = twse if instrument.market == "TW" else stooq
             raw = _raw(db, source.id, provider, "prices", instrument.id, observation)
             exists = db.scalar(
                 select(PriceDaily).where(

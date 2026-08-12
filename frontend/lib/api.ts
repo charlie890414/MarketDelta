@@ -12,6 +12,7 @@ export async function getChanges(
     severity?: string;
     minScore?: number;
     hours?: number;
+    watchlistId?: number;
   } = {},
 ): Promise<Change[]> {
   const { data, error } = await client.GET("/changes", {
@@ -23,6 +24,7 @@ export async function getChanges(
         market: filters.market,
         category: filters.category,
         severity: filters.severity,
+        watchlist_id: filters.watchlistId,
       },
     },
   });

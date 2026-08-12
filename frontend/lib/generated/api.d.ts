@@ -866,6 +866,7 @@ export interface operations {
                 severity?: string | null;
                 hours?: number;
                 limit?: number;
+                watchlist_id?: number;
             };
             header?: never;
             path?: never;

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = 20.0
+    stooq_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

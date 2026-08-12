@@ -99,6 +99,30 @@ class LiveProvider:
                         volume=Decimal(row["5. volume"]),
                     )
                 )
+            # Stooq is a free, keyless fallback for US daily OHLCV data.
+            covered = {row.symbol for row in results}
+            if self.settings.stooq_enabled:
+                for symbol in symbols:
+                    if not symbol.isalpha() or symbol in covered:
+                        continue
+                    try:
+                        response = await client.get(
+                            "https://stooq.com/q/d/l/",
+                            params={"s": f"{symbol.lower()}.us", "i": "d"},
+                        )
+                        response.raise_for_status()
+                        rows = list(csv.DictReader(StringIO(response.text)))
+                        if not rows:
+                            continue
+                        row = rows[-1]
+                        results.append(PriceObservation(
+                            symbol=symbol,
+                            trading_date=date.fromisoformat(row["Date"]),
+                            close=Decimal(row["Close"]),
+                            volume=_number(row.get("Volume")),
+                        ))
+                    except (httpx.HTTPError, KeyError, ValueError, InvalidOperation):
+                        continue
         return results
 
     async def estimates(self, symbols: Sequence[str]) -> list[EstimateObservation]:
@@ -308,21 +332,27 @@ class LiveProvider:
                 )
                 response.raise_for_status()
                 facts = response.json().get("facts", {}).get("us-gaap", {})
-                revenue = facts.get("RevenueFromContractWithCustomerExcludingAssessedTax")
-                units = (revenue or {}).get("units", {}).get("USD", [])
-                for fact in units:
-                    if fact.get("fp") != "FY" or not fact.get("fy") or not fact.get("filed"):
-                        continue
-                    results.append(
-                        FundamentalObservation(
-                            symbol=symbol,
-                            metric="revenue_annual",
-                            period=f"FY{fact['fy']}",
-                            value=Decimal(str(fact["val"])),
-                            unit="USD",
+                tags = {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": "revenue_annual",
+                    "Revenues": "revenue_annual",
+                    "GrossProfit": "gross_profit",
+                    "OperatingIncomeLoss": "operating_income",
+                    "NetIncomeLoss": "net_income",
+                    "CashAndCashEquivalentsAtCarryingValue": "cash",
+                    "LongTermDebtNoncurrent": "debt",
+                    "NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
+                }
+                for tag, metric in tags.items():
+                    fact_set = facts.get(tag, {}).get("units", {})
+                    unit, units = next(iter(fact_set.items()), (None, []))
+                    for fact in units:
+                        if fact.get("fp") != "FY" or not fact.get("fy") or not fact.get("filed"):
+                            continue
+                        results.append(FundamentalObservation(
+                            symbol=symbol, metric=metric, period=f"FY{fact['fy']}",
+                            value=Decimal(str(fact["val"])), unit=unit or "USD",
                             observed_at=datetime.fromisoformat(fact["filed"]).replace(tzinfo=UTC),
-                        )
-                    )
+                        ))
             if self.settings.mops_api_url:
                 response = await client.get(self.settings.mops_api_url)
                 response.raise_for_status()

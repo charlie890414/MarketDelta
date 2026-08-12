@@ -68,6 +68,7 @@ def list_changes(
     severity: str | None = None,
     hours: int = Query(24, ge=1, le=8760),
     limit: int = Query(100, ge=1, le=200),
+    watchlist_id: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
     query = (
@@ -87,6 +88,10 @@ def list_changes(
         query = query.where(Change.category == category)
     if severity:
         query = query.where(Change.severity == severity)
+    if watchlist_id:
+        query = query.join(WatchlistItem, WatchlistItem.instrument_id == Change.instrument_id).where(
+            WatchlistItem.watchlist_id == watchlist_id
+        )
     return [
         ChangeResponse(
             id=change.id,

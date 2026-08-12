@@ -10,6 +10,7 @@ SOURCES = [
     ("mops", "MOPS", "government", "official"),
     ("tdcc", "TDCC", "government", "official"),
     ("sec", "SEC Company Facts", "government", "official"),
+    ("stooq", "Stooq", "provider", "medium"),
 ]
 INSTRUMENTS = [
     ("AMD", "US", "NASDAQ", "Advanced Micro Devices", "USD"),
