@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import {
   addWatchlistItem,
+  createCompany,
   createWatchlist,
   deleteWatchlist,
   getWatchlists,
@@ -18,8 +19,11 @@ export default function WatchlistManager() {
   const [lists, setLists] = useState<Watchlist[]>([]);
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
+  const [market, setMarket] = useState<"TW" | "US">("TW");
+  const [companyName, setCompanyName] = useState("");
   const [selectedList, setSelectedList] = useState<number>();
   const [matches, setMatches] = useState<Awaited<ReturnType<typeof searchCompanies>>>([]);
+  const [searched, setSearched] = useState(false);
   const [message, setMessage] = useState("");
   const [items, setItems] = useState<Record<number, Awaited<ReturnType<typeof getWatchlistItems>>>>({});
 
@@ -51,9 +55,33 @@ export default function WatchlistManager() {
     event.preventDefault();
     if (!symbol.trim()) return;
     try {
-      setMatches(await searchCompanies(symbol.trim()));
+      const query = symbol.trim();
+      setMatches(await searchCompanies(query));
+      setMarket(/^\d{4,6}$/.test(query) ? "TW" : "US");
+      setSearched(true);
     } catch {
       setMessage("Search unavailable.");
+    }
+  }
+
+  async function createAndAdd() {
+    const symbolToAdd = symbol.trim().toUpperCase();
+    if (!symbolToAdd) return;
+    if (!selectedList) {
+      setMessage("Choose a watchlist first.");
+      return;
+    }
+    try {
+      await createCompany({
+        symbol: symbolToAdd,
+        market,
+        company_name: companyName.trim() || undefined,
+      });
+      await add(symbolToAdd);
+      setCompanyName("");
+      setSearched(false);
+    } catch {
+      setMessage("Could not create company. It may already exist.");
     }
   }
 
@@ -113,6 +141,17 @@ export default function WatchlistManager() {
         <div className="metric">{match.company_name}<span>{match.market} / {match.exchange ?? "market"}</span></div>
         <button className="pill selected" onClick={() => add(match.symbol)}>ADD</button>
       </div>)}
+      {searched && !matches.length && symbol.trim() && <div className="change result-row">
+        <i className="rail neutral" />
+        <div className="ticker">{symbol.trim().toUpperCase()}</div>
+        <div className="metric">Not tracked yet<span>Create it, then add it to the selected watchlist.</span></div>
+        <select aria-label="Company market" value={market} onChange={(event) => setMarket(event.target.value as "TW" | "US")}>
+          <option value="TW">TAIWAN</option>
+          <option value="US">US</option>
+        </select>
+        <input aria-label="Company name" value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="Company name (optional)" />
+        <button className="pill selected" onClick={createAndAdd}>CREATE & ADD</button>
+      </div>}
       {lists.map((list) => <div className="change management-row" key={list.id}>
         <i className="rail neutral" />
         <div className="ticker">{list.name}</div>

@@ -1,7 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChangeResponse(BaseModel):
@@ -37,6 +38,13 @@ class InstrumentResponse(BaseModel):
     exchange: str | None
     company_name: str
     currency: str
+
+
+class InstrumentCreate(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    market: Literal["TW", "US"]
+    exchange: str | None = Field(default=None, max_length=32)
+    company_name: str | None = Field(default=None, max_length=255)
 
 
 class WatchlistCreate(BaseModel):

@@ -8,6 +8,7 @@ def test_documented_domain_routes_are_exposed():
     expected = {
         "/changes",
         "/companies/search",
+        "/companies",
         "/companies/{symbol}/news",
         "/companies/{symbol}/ownership",
         "/companies/{symbol}/interpretations",

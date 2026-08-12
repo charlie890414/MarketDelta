@@ -48,6 +48,17 @@ export async function getCompany(symbol: string) {
   return data;
 }
 
+export async function createCompany(body: {
+  symbol: string;
+  market: "TW" | "US";
+  exchange?: string;
+  company_name?: string;
+}) {
+  const { data, error } = await client.POST("/companies", { body });
+  if (error || !data) throw new Error("Company creation failed");
+  return data;
+}
+
 export async function getCompanyChanges(symbol: string): Promise<Change[]> {
   const { data, error } = await client.GET("/companies/{symbol}/changes", { params: { path: { symbol } } });
   if (error || !data) throw new Error("Company changes unavailable");

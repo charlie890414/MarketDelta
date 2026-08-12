@@ -15,6 +15,7 @@ from app.api.schemas import (
     DailyReportResponse,
     EventResponse,
     HistoryPoint,
+    InstrumentCreate,
     InstrumentResponse,
     JobResponse,
     NewsResponse,
@@ -163,6 +164,27 @@ def list_companies(db: Session = Depends(get_db)):
             select(Instrument).where(Instrument.is_active.is_(True)).order_by(Instrument.symbol)
         )
     )
+
+
+@router.post("/companies", response_model=InstrumentResponse, status_code=201)
+def create_company(payload: InstrumentCreate, db: Session = Depends(get_db)):
+    symbol = payload.symbol.strip().upper()
+    if not symbol:
+        raise HTTPException(422, "Symbol must not be blank")
+    if db.scalar(select(Instrument).where(Instrument.market == payload.market, Instrument.symbol == symbol)):
+        raise HTTPException(409, "Company already exists")
+
+    instrument = Instrument(
+        symbol=symbol,
+        market=payload.market,
+        exchange=(payload.exchange or "").strip().upper() or None,
+        company_name=(payload.company_name or "").strip() or symbol,
+        currency="TWD" if payload.market == "TW" else "USD",
+    )
+    db.add(instrument)
+    db.commit()
+    db.refresh(instrument)
+    return instrument
 
 
 @router.get("/companies/search", response_model=list[InstrumentResponse])

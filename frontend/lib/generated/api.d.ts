@@ -65,7 +65,8 @@ export interface paths {
         /** List Companies */
         get: operations["list_companies_companies_get"];
         put?: never;
-        post?: never;
+        /** Create Company */
+        post: operations["create_company_companies_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -678,6 +679,20 @@ export interface components {
             /** Unit */
             unit: string;
         };
+        /** InstrumentCreate */
+        InstrumentCreate: {
+            /** Symbol */
+            symbol: string;
+            /**
+             * Market
+             * @enum {string}
+             */
+            market: "TW" | "US";
+            /** Exchange */
+            exchange?: string | null;
+            /** Company Name */
+            company_name?: string | null;
+        };
         /** InstrumentResponse */
         InstrumentResponse: {
             /** Id */
@@ -866,7 +881,7 @@ export interface operations {
                 severity?: string | null;
                 hours?: number;
                 limit?: number;
-                watchlist_id?: number;
+                watchlist_id?: number | null;
             };
             header?: never;
             path?: never;
@@ -941,6 +956,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentResponse"][];
+                };
+            };
+        };
+    };
+    create_company_companies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstrumentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
