@@ -23,6 +23,12 @@ services:
     volumes: ["./backend:/app/backend", "/app/backend/.venv"]
     depends_on:
       postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
   scheduler:
     build:
       context: .
@@ -32,7 +38,7 @@ services:
     env_file: [.env]
     volumes: ["./backend:/app/backend", "/app/backend/.venv"]
     depends_on:
-      postgres: {condition: service_healthy}
+      backend: {condition: service_healthy}
   frontend:
     build:
       context: .
@@ -43,7 +49,8 @@ services:
       API_INTERNAL_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: /api
     ports: ["3001:3000"]
-    volumes: ["./frontend:/app/frontend"]
+    # Keep container-installed dependencies when the source directory is bind-mounted.
+    volumes: ["./frontend:/app/frontend", "/app/frontend/node_modules"]
     depends_on: [backend]
 
 volumes:

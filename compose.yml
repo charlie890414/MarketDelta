@@ -54,7 +54,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-market}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-market_changes}}
       ENVIRONMENT: production
     depends_on:
-      postgres:
+      backend:
         condition: service_healthy
 
   frontend:

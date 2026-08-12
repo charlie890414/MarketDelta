@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -106,7 +107,10 @@ class JobRun(Base):
 
 class PriceDaily(Base):
     __tablename__ = "price_daily"
-    __table_args__ = (UniqueConstraint("instrument_id", "trading_date", "source_id"),)
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "trading_date", "source_id"),
+        Index("ix_price_daily_instrument_trading_date", "instrument_id", "trading_date"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
@@ -120,6 +124,7 @@ class FlowDaily(Base):
     __tablename__ = "flow_daily"
     __table_args__ = (
         UniqueConstraint("instrument_id", "source_id", "trading_date", "flow_type"),
+        Index("ix_flow_daily_instrument_trading_date", "instrument_id", "trading_date"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
@@ -135,6 +140,9 @@ class OwnershipSnapshot(Base):
     __tablename__ = "ownership_snapshots"
     __table_args__ = (
         UniqueConstraint("instrument_id", "source_id", "snapshot_date", "holder_bucket"),
+        Index(
+            "ix_ownership_snapshots_instrument_snapshot_date", "instrument_id", "snapshot_date"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -155,6 +163,9 @@ class EstimateSnapshot(Base):
         UniqueConstraint(
             "instrument_id", "source_id", "metric", "fiscal_period_label", "observed_at"
         ),
+        Index(
+            "ix_estimate_snapshots_instrument_observed_at", "instrument_id", "observed_at"
+        ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
@@ -173,6 +184,7 @@ class FundamentalSnapshot(Base):
         UniqueConstraint(
             "instrument_id", "source_id", "metric", "period_label", "observed_at"
         ),
+        Index("ix_fundamentals_instrument_observed_at", "instrument_id", "observed_at"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
@@ -187,6 +199,10 @@ class FundamentalSnapshot(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        Index("ix_events_instrument_event_date", "instrument_id", "event_date"),
+        Index("ix_events_event_date_title", "event_date", "title"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int | None] = mapped_column(ForeignKey("instruments.id"))
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
@@ -210,6 +226,7 @@ class Event(Base):
 
 class NewsItem(Base):
     __tablename__ = "news_items"
+    __table_args__ = (Index("ix_news_items_published_at", "published_at"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
     raw_ingestion_id: Mapped[int | None] = mapped_column(ForeignKey("raw_ingestions.id"))
@@ -228,6 +245,9 @@ class NewsItem(Base):
 
 class NewsInstrument(Base):
     __tablename__ = "news_instruments"
+    __table_args__ = (
+        Index("ix_news_instruments_instrument_news", "instrument_id", "news_item_id"),
+    )
     news_item_id: Mapped[int] = mapped_column(
         ForeignKey("news_items.id", ondelete="CASCADE"), primary_key=True
     )
@@ -239,6 +259,9 @@ class NewsInstrument(Base):
 
 class Change(Base):
     __tablename__ = "changes"
+    __table_args__ = (
+        Index("ix_changes_instrument_detected_at", "instrument_id", "detected_at"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     category: Mapped[str] = mapped_column(String(32), index=True)
@@ -270,6 +293,9 @@ class Change(Base):
 
 class AIInterpretation(Base):
     __tablename__ = "ai_interpretations"
+    __table_args__ = (
+        Index("ix_ai_interpretations_instrument_generated_at", "instrument_id", "generated_at"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"))
     interpretation_type: Mapped[str] = mapped_column(String(32), default="change")
@@ -323,7 +349,10 @@ class Alert(Base):
 
 class AlertDelivery(Base):
     __tablename__ = "alert_deliveries"
-    __table_args__ = (UniqueConstraint("alert_id", "change_id"),)
+    __table_args__ = (
+        UniqueConstraint("alert_id", "change_id"),
+        Index("ix_alert_deliveries_delivered_at", "delivered_at"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"))
     change_id: Mapped[int] = mapped_column(ForeignKey("changes.id", ondelete="CASCADE"))
