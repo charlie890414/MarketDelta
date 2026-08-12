@@ -72,7 +72,7 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   return (
     <main className="main">
       <div className="eyebrow">Market state / {date}</div>
-      <h1>What changed<br /><span style={{ color: "#d9ff62" }}>while you were away.</span></h1>
+      <h1>What changed<br /><span>while you were away.</span></h1>
       <p className="lede">A deterministic read of price, expectations and institutional flow. No narrative until the numbers have moved.</p>
       <nav className="toolbar" aria-label="Change feed filters">
         {filters.map(([label, href, selected]) => (

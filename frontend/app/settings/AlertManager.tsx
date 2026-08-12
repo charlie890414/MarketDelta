@@ -29,7 +29,8 @@ export default function AlertManager({ initialAlerts }: { initialAlerts: Alert[]
   }
 
   return <>
-    {alerts.map((alert) => <div className="change" key={alert.id}>
+    {alerts.map((alert) => <div className="change alert-row" key={alert.id}>
+      <i className={`rail ${alert.is_enabled ? "" : "down"}`} />
       <div className="ticker">{alert.name}</div>
       <div className="metric">score ≥ {alert.min_score}<span>{alert.market ?? "all markets"} · {alert.category ?? "all categories"}</span></div>
       <button className={`pill ${alert.is_enabled ? "selected" : ""}`} onClick={() => toggle(alert)}>{alert.is_enabled ? "ON" : "OFF"}</button>

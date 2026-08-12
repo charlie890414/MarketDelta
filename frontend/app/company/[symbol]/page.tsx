@@ -18,7 +18,7 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
     ]);
     return <main className="main">
       <Link className="eyebrow" href="/dashboard">← back to feed</Link>
-      <h1>{company.symbol}<br /><span style={{ color: "#91a099" }}>{company.company_name}.</span></h1>
+      <h1>{company.symbol}<br /><span>{company.company_name}.</span></h1>
       <p className="lede">{company.market} / {company.exchange ?? "market"} / {company.currency}. Objective changes are kept separate from interpretation.</p>
       <div className="toolbar"><span className="pill selected">{changes.length} CHANGES</span><span className="pill">{history.length} OBSERVATIONS</span></div>
       <section className="feed">

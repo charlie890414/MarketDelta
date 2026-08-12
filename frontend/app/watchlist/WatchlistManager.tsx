@@ -107,16 +107,18 @@ export default function WatchlistManager() {
         <input aria-label="Company search" value={symbol} onChange={(event) => setSymbol(event.target.value)} placeholder="Ticker or company" />
         <button className="pill" type="submit">SEARCH</button>
       </form>
-      {matches.map((match) => <div className="change" key={match.id}>
+      {matches.map((match) => <div className="change result-row" key={match.id}>
+        <i className="rail neutral" />
         <div className="ticker">{match.symbol}</div>
         <div className="metric">{match.company_name}<span>{match.market} / {match.exchange ?? "market"}</span></div>
         <button className="pill selected" onClick={() => add(match.symbol)}>ADD</button>
       </div>)}
-      {lists.map((list) => <div className="change" key={list.id}>
+      {lists.map((list) => <div className="change management-row" key={list.id}>
+        <i className="rail neutral" />
         <div className="ticker">{list.name}</div>
         <div className="metric">{list.description ?? "No description"}</div>
         <button className="pill" onClick={() => remove(list.id)}>DELETE</button>
-        <div className="history-list">{(items[list.id] ?? []).map((item) => <div className="history-row" key={item.instrument_id}><span className="history-metric">{item.symbol}</span><span>{item.company_name}</span><button className="pill" onClick={() => removeItem(list.id, item.instrument_id)}>REMOVE</button></div>)}</div>
+        <div className="watchlist-items"><div className="history-list">{(items[list.id] ?? []).map((item) => <div className="history-row" key={item.instrument_id}><span className="history-metric">{item.symbol}</span><span>{item.company_name}</span><button className="pill" onClick={() => removeItem(list.id, item.instrument_id)}>REMOVE</button></div>)}</div></div>
       </div>)}
       {message && <div className="empty">{message}</div>}
     </section>
