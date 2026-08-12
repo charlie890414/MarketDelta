@@ -94,6 +94,12 @@ export async function getAlertDeliveries() {
   return data;
 }
 
+export async function getAlerts() {
+  const { data, error } = await client.GET("/alerts");
+  if (error || !data) throw new Error("Alerts unavailable");
+  return data;
+}
+
 export async function createWatchlist(name: string, description?: string) {
   const { data, error } = await client.POST("/watchlists", {
     body: { name, description },

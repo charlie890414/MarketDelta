@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.alerts.service import evaluate_alerts
+from app.alerts.service import dispatch_alerts, evaluate_alerts
 from app.api.schemas import (
     AIInterpretationResponse,
     AlertCreate,
@@ -24,6 +24,7 @@ from app.api.schemas import (
     WatchlistResponse,
     WatchlistUpdate,
 )
+from app.config import get_settings
 from app.db.models import (
     AIInterpretation,
     Alert,
@@ -578,8 +579,15 @@ def list_alert_deliveries(limit: int = Query(100, ge=1, le=500), db: Session = D
 
 
 @router.post("/alerts/evaluate", response_model=list[AlertDeliveryResponse])
-def evaluate_alert_deliveries(db: Session = Depends(get_db)):
+async def evaluate_alert_deliveries(db: Session = Depends(get_db)):
     deliveries = evaluate_alerts(db)
+    settings = get_settings()
+    await dispatch_alerts(
+        deliveries,
+        settings.alert_webhook_url,
+        settings.alert_webhook_retries,
+        settings.alert_webhook_backoff_seconds,
+    )
     db.commit()
     return deliveries
 
