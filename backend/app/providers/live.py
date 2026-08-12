@@ -1,7 +1,7 @@
 import csv
 import json
 from asyncio import to_thread
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
@@ -70,6 +70,7 @@ class LiveProvider:
                             trading_date=datetime.now(UTC).date(),
                             close=close,
                             volume=_number(row.get("TradeVolume")),
+                            source_code="twse",
                         )
                     )
                 covered = {observation.symbol for observation in results}
@@ -94,6 +95,7 @@ class LiveProvider:
                                 trading_date=_tw_date(row.get("Date")) or datetime.now(UTC).date(),
                                 close=close,
                                 volume=_number(row.get("TradingShares")),
+                                source_code="tpex",
                             )
                         )
             # Use yfinance for US daily OHLCV data. Alpha Vantage remains reserved
@@ -145,6 +147,7 @@ class LiveProvider:
                         trading_date=trading_date.date(),
                         close=Decimal(str(close)),
                         volume=_number(row.get("Volume")),
+                        source_code="yfinance",
                     )
                 )
             return observations
@@ -178,6 +181,7 @@ class LiveProvider:
                             trading_date=trading_date,
                             close=close,
                             volume=_number(row[1]) if len(row) > 1 else None,
+                            source_code="twse",
                         )
             except (httpx.HTTPError, IndexError, TypeError, ValueError):
                 pass
@@ -206,18 +210,26 @@ class LiveProvider:
                 response.raise_for_status()
                 for row in response.json().get("estimates", []):
                     fiscal_period = row.get("fiscalDateEnding")
-                    value = _number(row.get("estimatedEPS"))
-                    if not fiscal_period or value is None:
+                    if not fiscal_period:
                         continue
-                    results.append(
-                        EstimateObservation(
-                            symbol=symbol,
-                            metric="eps_estimate",
-                            fiscal_period=fiscal_period,
-                            value=value,
-                            observed_at=datetime.now(UTC),
+                    for metric, field, unit in (
+                        ("eps_estimate", "estimatedEPS", "USD/share"),
+                        ("revenue_estimate", "estimatedRevenue", "USD"),
+                        ("analyst_count", "numberOfAnalysts", "analysts"),
+                    ):
+                        value = _number(row.get(field))
+                        if value is None:
+                            continue
+                        results.append(
+                            EstimateObservation(
+                                symbol=symbol,
+                                metric=metric,
+                                fiscal_period=fiscal_period,
+                                value=value,
+                                observed_at=datetime.now(UTC),
+                                unit=unit,
+                            )
                         )
-                    )
         return results
 
     async def flows(self, symbols: Sequence[str]) -> list[FlowObservation]:
@@ -267,37 +279,48 @@ class LiveProvider:
         return results
 
     async def events(self, symbols: Sequence[str]) -> list[EventObservation]:
-        if not self.settings.alpha_vantage_api_key:
-            return []
         results: list[EventObservation] = []
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            response = await client.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": "EARNINGS_CALENDAR",
-                    "horizon": "3month",
-                    "apikey": self.settings.alpha_vantage_api_key,
-                },
-            )
-            response.raise_for_status()
-            for row in csv.DictReader(StringIO(response.text)):
-                symbol = str(row.get("symbol", "")).upper()
-                report_date = str(row.get("reportDate", ""))
-                if symbol not in symbols or not report_date:
-                    continue
-                try:
-                    event_date = datetime.fromisoformat(report_date).date()
-                except ValueError:
-                    continue
-                results.append(
-                    EventObservation(
-                        symbol=symbol,
-                        event_type="earnings",
-                        title=f"{row.get('name') or symbol} earnings release",
-                        event_date=event_date,
-                        source_url="https://www.alphavantage.co/",
-                    )
+            if self.settings.alpha_vantage_api_key:
+                response = await client.get(
+                    "https://www.alphavantage.co/query",
+                    params={
+                        "function": "EARNINGS_CALENDAR",
+                        "horizon": "3month",
+                        "apikey": self.settings.alpha_vantage_api_key,
+                    },
                 )
+                response.raise_for_status()
+                for row in csv.DictReader(StringIO(response.text)):
+                    symbol = str(row.get("symbol", "")).upper()
+                    report_date = str(row.get("reportDate", ""))
+                    if symbol not in symbols or not report_date:
+                        continue
+                    try:
+                        event_date = datetime.fromisoformat(report_date).date()
+                    except ValueError:
+                        continue
+                    results.append(
+                        EventObservation(
+                            symbol=symbol,
+                            event_type="earnings",
+                            title=f"{row.get('name') or symbol} earnings release",
+                            event_date=event_date,
+                            source_url="https://www.alphavantage.co/",
+                            source_code="alphavantage",
+                        )
+                    )
+            cik_map = json.loads(self.settings.sec_cik_map)
+            for symbol in symbols:
+                cik = cik_map.get(symbol.upper())
+                if not cik:
+                    continue
+                response = await client.get(
+                    f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json",
+                    headers={"User-Agent": self.settings.sec_user_agent},
+                )
+                response.raise_for_status()
+                results.extend(_sec_filing_events(symbol.upper(), response.json()))
         return results
 
     async def ownership(self, symbols: Sequence[str]) -> list[OwnershipObservation]:
@@ -310,50 +333,48 @@ class LiveProvider:
             results.extend(_parse_tdcc_rows(response.json(), symbols))
         return results
 
-    async def news(self, symbols: Sequence[str]) -> list[NewsObservation]:
+    async def news(
+        self, symbols: Sequence[str], search_terms: Mapping[str, Sequence[str]] | None = None
+    ) -> list[NewsObservation]:
         results: list[NewsObservation] = []
         oldest_allowed = datetime.now(UTC) - timedelta(days=self.settings.news_max_age_days)
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             for symbol in symbols:
-                if not symbol.isalpha():
-                    continue
-                try:
-                    response = await client.get(
-                        "https://news.google.com/rss/search",
-                        params={
-                            "q": f"{symbol} stock",
-                            "hl": "en-US",
-                            "gl": "US",
-                            "ceid": "US:en",
-                        },
-                    )
-                    response.raise_for_status()
-                    items = ElementTree.fromstring(response.content).findall(".//item")
-                except (httpx.HTTPError, ElementTree.ParseError):
-                    continue
-                for item in items:
-                    headline = (item.findtext("title") or "").strip()
-                    url = (item.findtext("link") or "").strip()
-                    published = (item.findtext("pubDate") or "").strip()
-                    source = item.find("source")
-                    if not headline or not url or not published:
-                        continue
+                seen_urls: set[str] = set()
+                for query, locale in _news_queries(symbol, (search_terms or {}).get(symbol, [])):
                     try:
-                        published_at = parsedate_to_datetime(published).astimezone(UTC)
-                    except (TypeError, ValueError):
-                        continue
-                    if published_at < oldest_allowed:
-                        continue
-                    results.append(
-                        NewsObservation(
-                            symbol=symbol,
-                            external_id=sha1(url.encode(), usedforsecurity=False).hexdigest(),
-                            headline=headline,
-                            published_at=published_at,
-                            source_name=source.text if source is not None else "Google News",
-                            source_url=url,
+                        response = await client.get(
+                            "https://news.google.com/rss/search",
+                            params={"q": query, **locale},
                         )
-                    )
+                        response.raise_for_status()
+                        items = ElementTree.fromstring(response.content).findall(".//item")
+                    except (httpx.HTTPError, ElementTree.ParseError):
+                        continue
+                    for item in items:
+                        headline = (item.findtext("title") or "").strip()
+                        url = (item.findtext("link") or "").strip()
+                        published = (item.findtext("pubDate") or "").strip()
+                        source = item.find("source")
+                        if not headline or not url or not published or url in seen_urls:
+                            continue
+                        try:
+                            published_at = parsedate_to_datetime(published).astimezone(UTC)
+                        except (TypeError, ValueError):
+                            continue
+                        if published_at < oldest_allowed:
+                            continue
+                        seen_urls.add(url)
+                        results.append(
+                            NewsObservation(
+                                symbol=symbol,
+                                external_id=sha1(url.encode(), usedforsecurity=False).hexdigest(),
+                                headline=headline,
+                                published_at=published_at,
+                                source_name=source.text if source is not None else "Google News",
+                                source_url=url,
+                            )
+                        )
         return results
 
     async def fundamentals(self, symbols: Sequence[str]) -> list[FundamentalObservation]:
@@ -400,18 +421,23 @@ class LiveProvider:
                     "CashAndCashEquivalentsAtCarryingValue": "cash",
                     "LongTermDebtNoncurrent": "debt",
                     "NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
+                    "EarningsPerShareDiluted": "eps_diluted",
+                    "EarningsPerShareBasic": "eps_basic",
                 }
                 for tag, metric in tags.items():
                     fact_set = facts.get(tag, {}).get("units", {})
                     unit, units = next(iter(fact_set.items()), (None, []))
                     for fact in units:
-                        if fact.get("fp") != "FY" or not fact.get("fy") or not fact.get("filed"):
+                        fiscal_period = fact.get("fp")
+                        if fiscal_period not in {"FY", "Q1", "Q2", "Q3"}:
+                            continue
+                        if not fact.get("fy") or not fact.get("filed"):
                             continue
                         results.append(
                             FundamentalObservation(
                                 symbol=symbol,
                                 metric=metric,
-                                period=f"FY{fact['fy']}",
+                                period=f"{fiscal_period}{fact['fy']}",
                                 value=Decimal(str(fact["val"])),
                                 unit=unit or "USD",
                                 observed_at=datetime.fromisoformat(fact["filed"]).replace(
@@ -506,6 +532,68 @@ def _parse_tdcc_rows(rows: list[dict], symbols: Sequence[str]) -> list[Ownership
             )
         )
     return results
+
+
+def _sec_filing_events(symbol: str, payload: dict) -> list[EventObservation]:
+    """Normalize material SEC filings from a company's recent submissions feed."""
+    recent = payload.get("filings", {}).get("recent", {})
+    forms = recent.get("form", [])
+    dates = recent.get("filingDate", [])
+    accessions = recent.get("accessionNumber", [])
+    documents = recent.get("primaryDocument", [])
+    filing_types = {
+        "8-K": "material_filing",
+        "10-Q": "quarterly_filing",
+        "10-K": "annual_filing",
+        "4": "insider_transaction",
+        "13F-HR": "institutional_holding",
+        "SC 13G": "beneficial_ownership",
+        "SC 13D": "beneficial_ownership",
+    }
+    cik = str(payload.get("cik", "")).lstrip("0")
+    events: list[EventObservation] = []
+    for form, filing_date, accession, document in zip(
+        forms, dates, accessions, documents, strict=False
+    ):
+        event_type = filing_types.get(str(form))
+        if not event_type:
+            continue
+        try:
+            event_date = date.fromisoformat(str(filing_date))
+        except ValueError:
+            continue
+        accession_id = str(accession).replace("-", "")
+        url = (
+            f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_id}/{document}"
+            if cik and accession_id and document
+            else "https://www.sec.gov/edgar/search/"
+        )
+        events.append(
+            EventObservation(
+                symbol=symbol,
+                event_type=event_type,
+                title=f"SEC Form {form} filed",
+                event_date=event_date,
+                source_url=url,
+                source_code="sec_filings",
+            )
+        )
+    return events
+
+
+def _news_queries(symbol: str, terms: Sequence[str]) -> list[tuple[str, dict[str, str]]]:
+    """Build company-first queries; a ticker is only a disambiguator, never the topic."""
+    is_taiwan = symbol.isdigit()
+    locale = (
+        {"hl": "zh-TW", "gl": "TW", "ceid": "TW:zh-Hant"}
+        if is_taiwan
+        else {"hl": "en-US", "gl": "US", "ceid": "US:en"}
+    )
+    topic = "股票 OR 營收 OR 法說 OR 股利" if is_taiwan else "stock OR earnings OR guidance"
+    unique_terms = list(dict.fromkeys(term.strip() for term in terms if term and term.strip()))
+    if not unique_terms:
+        unique_terms = [symbol]
+    return [(f'"{term}" ({topic})', locale) for term in unique_terms]
 
 
 def _tw_date(value: object):

@@ -7,6 +7,7 @@ def test_documented_domain_routes_are_exposed():
 
     expected = {
         "/changes",
+        "/data-sources",
         "/companies/search",
         "/companies",
         "/companies/{symbol}/news",
@@ -25,7 +26,13 @@ def test_documented_domain_routes_are_exposed():
 def test_openapi_has_generated_response_contracts():
     schemas = app.openapi()["components"]["schemas"]
 
-    assert {"ChangeResponse", "DailyReportResponse", "NewsResponse", "AlertResponse"} <= schemas.keys()
+    assert {
+        "ChangeResponse",
+        "DataSourceResponse",
+        "DailyReportResponse",
+        "NewsResponse",
+        "AlertResponse",
+    } <= schemas.keys()
 
 
 def test_high_volume_read_paths_have_composite_indexes():

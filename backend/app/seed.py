@@ -1,30 +1,33 @@
 from sqlalchemy import select
 
+from app.data_sources import SOURCE_CATALOG
 from app.db.models import DataSource, Watchlist
 from app.db.session import SessionLocal
 
-SOURCES = [
-    ("twse", "TWSE", "exchange", "official"),
-    ("alphavantage", "Alpha Vantage", "provider", "medium"),
-    ("google_news", "Google News RSS", "news", "medium"),
-    ("mops", "MOPS", "government", "official"),
-    ("tdcc", "TDCC", "government", "official"),
-    ("sec", "SEC Company Facts", "government", "official"),
-    ("yfinance", "Yahoo Finance", "provider", "medium"),
-]
+
 def seed() -> None:
     with SessionLocal() as db:
-        for code, name, source_type, confidence in SOURCES:
-            if not db.scalar(select(DataSource).where(DataSource.code == code)):
+        for definition in SOURCE_CATALOG:
+            source = db.scalar(select(DataSource).where(DataSource.code == definition["code"]))
+            metadata = {
+                key: definition[key] for key in ("markets", "domains", "cadence", "access", "url")
+            }
+            if source is None:
                 db.add(
                     DataSource(
-                        code=code,
-                        name=name,
-                        source_type=source_type,
-                        confidence=confidence,
-                        metadata_={},
+                        code=definition["code"],
+                        name=definition["name"],
+                        source_type=definition["source_type"],
+                        confidence=definition["confidence"],
+                        is_enabled=definition["enabled_by_default"],
+                        metadata_=metadata,
                     )
                 )
+            else:
+                source.name = definition["name"]
+                source.source_type = definition["source_type"]
+                source.confidence = definition["confidence"]
+                source.metadata_ = metadata
         db.flush()
         for name in ("Portfolio", "Watchlist", "Research"):
             if not db.scalar(select(Watchlist).where(Watchlist.name == name)):

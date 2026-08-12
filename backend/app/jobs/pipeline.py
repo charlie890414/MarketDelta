@@ -26,6 +26,7 @@ from app.db.models import (
     FlowDaily,
     FundamentalSnapshot,
     Instrument,
+    InstrumentAlias,
     JobRun,
     NewsInstrument,
     NewsItem,
@@ -253,7 +254,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         mops = db.scalar(select(DataSource).where(DataSource.code == "mops")) or twse
         tdcc = db.scalar(select(DataSource).where(DataSource.code == "tdcc")) or twse
         sec = db.scalar(select(DataSource).where(DataSource.code == "sec")) or alpha
-        yfinance = db.scalar(select(DataSource).where(DataSource.code == "yfinance")) or alpha
+        sec_filings = db.scalar(select(DataSource).where(DataSource.code == "sec_filings")) or sec
         if not twse or not alpha:
             job.status = "failed"
             job.finished_at = datetime.now(UTC)
@@ -274,6 +275,17 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             )
         )
         symbols = [row.symbol for row in instruments]
+        search_terms = {
+            instrument.symbol: [
+                instrument.company_name,
+                *db.scalars(
+                    select(InstrumentAlias.alias).where(
+                        InstrumentAlias.instrument_id == instrument.id
+                    )
+                ),
+            ]
+            for instrument in instruments
+        }
         errors: list[str] = []
         backfill_days = get_settings().initial_price_backfill_days
         latest_price_dates = dict(
@@ -337,7 +349,9 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         flows = await _fetch_domain("flows", lambda: provider.flows(symbols), errors)
         events = await _fetch_domain("events", lambda: provider.events(symbols), errors)
         ownership = await _fetch_domain("ownership", lambda: provider.ownership(symbols), errors)
-        news = await _fetch_domain("news", lambda: provider.news(symbols), errors)
+        news = await _fetch_domain(
+            "news", lambda: provider.news(symbols, search_terms=search_terms), errors
+        )
         fundamentals = await _fetch_domain(
             "fundamentals", lambda: provider.fundamentals(symbols), errors
         )
@@ -347,7 +361,13 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             instrument = _instrument(db, observation.symbol)
             if not instrument:
                 continue
-            source = twse if instrument.market == "TW" else yfinance
+            source_code = observation.source_code or (
+                "twse" if instrument.market == "TW" else "yfinance"
+            )
+            source = db.scalar(select(DataSource).where(DataSource.code == source_code))
+            if source is None:
+                errors.append(f"prices: missing data source {source_code}")
+                continue
             raw = _raw(db, source.id, provider, "prices", instrument.id, observation)
             exists = db.scalar(
                 select(PriceDaily).where(
@@ -449,7 +469,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                         metric=observation.metric,
                         fiscal_period_label=observation.fiscal_period,
                         value=observation.value,
-                        unit="USD",
+                        unit=observation.unit,
                         observed_at=observation.observed_at,
                     )
                 )
@@ -457,7 +477,14 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
 
         for observation in events:
             instrument = _instrument(db, observation.symbol) if observation.symbol else None
-            source = alpha if instrument and instrument.market == "US" else twse
+            source = (
+                sec_filings
+                if observation.source_code == "sec_filings"
+                else alpha
+                if observation.source_code == "alphavantage"
+                or (instrument and instrument.market == "US")
+                else twse
+            )
             exists = db.scalar(
                 select(Event).where(
                     Event.instrument_id == instrument.id
@@ -519,9 +546,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                 )
                 inserted += 1
 
-        oldest_news_allowed = datetime.now(UTC) - timedelta(
-            days=get_settings().news_max_age_days
-        )
+        oldest_news_allowed = datetime.now(UTC) - timedelta(days=get_settings().news_max_age_days)
         for observation in news:
             if observation.published_at < oldest_news_allowed:
                 continue

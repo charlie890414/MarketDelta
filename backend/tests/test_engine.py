@@ -89,14 +89,16 @@ def test_mops_parser_normalizes_official_chinese_revenue_fields():
 
 
 def test_tdcc_parser_normalizes_official_chinese_distribution_fields():
-    rows = [{
-        "證券代號": "2330",
-        "資料日期": "115/08/11",
-        "持股分級": "400001以上",
-        "人數": "1,234",
-        "股數": "4,210,000,000",
-        "占集保庫存數比例": "16.20%",
-    }]
+    rows = [
+        {
+            "證券代號": "2330",
+            "資料日期": "115/08/11",
+            "持股分級": "400001以上",
+            "人數": "1,234",
+            "股數": "4,210,000,000",
+            "占集保庫存數比例": "16.20%",
+        }
+    ]
 
     observations = _parse_tdcc_rows(rows, ["2330"])
 

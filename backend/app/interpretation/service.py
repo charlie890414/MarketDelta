@@ -34,8 +34,15 @@ def _deterministic_output(instrument: Instrument, changes: list[Change]) -> Inte
             for change in positive[:5]
         ],
         contradictions=[f"{change.metric} moved {change.direction}" for change in negative[:5]],
-        watch_next=["Review the next scheduled event", "Check whether the highest-score signal persists"],
-        thesis_impact="strengthened" if len(positive) > len(negative) else "weakened" if negative else "unknown",
+        watch_next=[
+            "Review the next scheduled event",
+            "Check whether the highest-score signal persists",
+        ],
+        thesis_impact="strengthened"
+        if len(positive) > len(negative)
+        else "weakened"
+        if negative
+        else "unknown",
     )
 
 
@@ -102,7 +109,9 @@ def generate_interpretation(db: Session, instrument: Instrument) -> AIInterpreta
         return None
 
     output = _llm_output(instrument, changes) or _deterministic_output(instrument, changes)
-    model_provider = "openai-compatible" if settings.llm_base_url and settings.llm_api_key else "deterministic"
+    model_provider = (
+        "openai-compatible" if settings.llm_base_url and settings.llm_api_key else "deterministic"
+    )
     model_name = settings.llm_model if model_provider != "deterministic" else "rule-based-v1"
     interpretation = AIInterpretation(
         instrument_id=instrument.id,
@@ -117,7 +126,11 @@ def generate_interpretation(db: Session, instrument: Instrument) -> AIInterpreta
         model_name=model_name,
         prompt_version=PROMPT_VERSION if model_provider != "deterministic" else "none",
         generated_at=datetime.now(UTC),
-        metadata_={"source": "changes", "change_count": len(changes), "llm_enabled": model_provider != "deterministic"},
+        metadata_={
+            "source": "changes",
+            "change_count": len(changes),
+            "llm_enabled": model_provider != "deterministic",
+        },
     )
     db.add(interpretation)
     db.flush()

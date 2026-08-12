@@ -140,9 +140,7 @@ class OwnershipSnapshot(Base):
     __tablename__ = "ownership_snapshots"
     __table_args__ = (
         UniqueConstraint("instrument_id", "source_id", "snapshot_date", "holder_bucket"),
-        Index(
-            "ix_ownership_snapshots_instrument_snapshot_date", "instrument_id", "snapshot_date"
-        ),
+        Index("ix_ownership_snapshots_instrument_snapshot_date", "instrument_id", "snapshot_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -163,9 +161,7 @@ class EstimateSnapshot(Base):
         UniqueConstraint(
             "instrument_id", "source_id", "metric", "fiscal_period_label", "observed_at"
         ),
-        Index(
-            "ix_estimate_snapshots_instrument_observed_at", "instrument_id", "observed_at"
-        ),
+        Index("ix_estimate_snapshots_instrument_observed_at", "instrument_id", "observed_at"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
@@ -181,9 +177,7 @@ class EstimateSnapshot(Base):
 class FundamentalSnapshot(Base):
     __tablename__ = "fundamentals"
     __table_args__ = (
-        UniqueConstraint(
-            "instrument_id", "source_id", "metric", "period_label", "observed_at"
-        ),
+        UniqueConstraint("instrument_id", "source_id", "metric", "period_label", "observed_at"),
         Index("ix_fundamentals_instrument_observed_at", "instrument_id", "observed_at"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -259,9 +253,7 @@ class NewsInstrument(Base):
 
 class Change(Base):
     __tablename__ = "changes"
-    __table_args__ = (
-        Index("ix_changes_instrument_detected_at", "instrument_id", "detected_at"),
-    )
+    __table_args__ = (Index("ix_changes_instrument_detected_at", "instrument_id", "detected_at"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     category: Mapped[str] = mapped_column(String(32), index=True)
@@ -331,9 +323,7 @@ class DailyReport(Base):
     report_type: Mapped[str] = mapped_column(String(32))
     title: Mapped[str] = mapped_column(Text)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Alert(Base):
@@ -356,5 +346,7 @@ class AlertDelivery(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"))
     change_id: Mapped[int] = mapped_column(ForeignKey("changes.id", ondelete="CASCADE"))
-    delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     status: Mapped[str] = mapped_column(String(32), default="pending")

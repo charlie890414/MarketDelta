@@ -55,9 +55,7 @@ def score_change(
         "news": 70,
         "flow": 75,
         "price": 55,
-    }.get(
-        candidate.category, 50
-    )
+    }.get(candidate.category, 50)
     total = sum(
         value * WEIGHTS[key]
         for key, value in {

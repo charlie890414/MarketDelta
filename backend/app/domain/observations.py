@@ -10,6 +10,7 @@ class PriceObservation(BaseModel):
     trading_date: date
     close: Decimal
     volume: Decimal | None = None
+    source_code: str | None = None
 
 
 class EstimateObservation(BaseModel):
@@ -19,6 +20,7 @@ class EstimateObservation(BaseModel):
     fiscal_period: str
     value: Decimal
     observed_at: datetime
+    unit: str = "USD"
 
 
 class FundamentalObservation(BaseModel):
@@ -46,6 +48,7 @@ class EventObservation(BaseModel):
     title: str
     event_date: date | None
     source_url: str | None = None
+    source_code: str | None = None
 
 
 class OwnershipObservation(BaseModel):

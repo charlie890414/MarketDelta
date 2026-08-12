@@ -50,6 +50,20 @@ class InstrumentCreate(BaseModel):
     company_name: str | None = Field(default=None, max_length=255)
 
 
+class DataSourceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    code: str
+    name: str
+    source_type: str
+    confidence: str
+    is_enabled: bool
+    markets: list[str]
+    domains: list[str]
+    cadence: str | None = None
+    access: str | None = None
+    url: str | None = None
+
+
 class WatchlistCreate(BaseModel):
     name: str
     description: str | None = None

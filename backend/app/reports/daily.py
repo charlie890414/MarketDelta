@@ -80,9 +80,13 @@ def generate_daily_reports(db: Session, report_date: date | None = None) -> list
     )
     watchlist_ids = set(db.scalars(select(WatchlistItem.instrument_id).distinct()))
     portfolio_rows = _changes(db, start, instrument_ids=portfolio_ids)
-    portfolio_changes = [_change_payload(change, instrument) for change, instrument in portfolio_rows]
+    portfolio_changes = [
+        _change_payload(change, instrument) for change, instrument in portfolio_rows
+    ]
     watchlist_rows = _changes(db, start, instrument_ids=watchlist_ids)
-    watchlist_changes = [_change_payload(change, instrument) for change, instrument in watchlist_rows]
+    watchlist_changes = [
+        _change_payload(change, instrument) for change, instrument in watchlist_rows
+    ]
 
     upcoming = list(
         db.scalars(

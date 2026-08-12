@@ -69,7 +69,12 @@ def _make_change(
     if current_value == previous_value:
         return None
     absolute, pct, direction = compare(previous_value, current_value)
-    if direction == "up" and previous_value < 0 <= current_value or direction == "down" and previous_value >= 0 > current_value:
+    if (
+        direction == "up"
+        and previous_value < 0 <= current_value
+        or direction == "down"
+        and previous_value >= 0 > current_value
+    ):
         change_type = "reversed"
     candidate = ChangeCandidate(
         symbol=instrument.symbol,
@@ -85,8 +90,10 @@ def _make_change(
         change_type=change_type,
         baseline_type=lookback,
     )
-    observed_at = current.observed_at if hasattr(current, "observed_at") else datetime.combine(
-        current.trading_date, datetime.min.time(), tzinfo=UTC
+    observed_at = (
+        current.observed_at
+        if hasattr(current, "observed_at")
+        else datetime.combine(current.trading_date, datetime.min.time(), tzinfo=UTC)
     )
     scores = score_change(
         candidate,
@@ -193,7 +200,9 @@ def detect_price_changes(db: Session, instrument: Instrument) -> list[Change]:
         )
         if volume_change:
             changes.append(volume_change)
-        average_volume = sum((row.volume or 0 for row in rows[1:21]), Decimal(0)) / min(len(rows[1:21]), 20)
+        average_volume = sum((row.volume or 0 for row in rows[1:21]), Decimal(0)) / min(
+            len(rows[1:21]), 20
+        )
         relative_volume = _make_change(
             instrument,
             SimpleNamespace(
@@ -371,7 +380,11 @@ def detect_estimate_changes(db: Session, instrument: Instrument) -> list[Change]
             continue
         source = db.get(DataSource, pair[0].source_id)
         change = _make_change(
-            instrument, pair[0], pair[1], category="expectation", metric=pair[0].metric,
+            instrument,
+            pair[0],
+            pair[1],
+            category="expectation",
+            metric=pair[0].metric,
             period=pair[0].fiscal_period_label,
             source=source,
             snapshot_type="estimate_snapshots",
@@ -399,7 +412,11 @@ def detect_fundamental_changes(db: Session, instrument: Instrument) -> list[Chan
             continue
         source = db.get(DataSource, pair[0].source_id)
         change = _make_change(
-            instrument, pair[0], pair[1], category="fundamental", metric=pair[0].metric,
+            instrument,
+            pair[0],
+            pair[1],
+            category="fundamental",
+            metric=pair[0].metric,
             period=pair[0].period_label,
             source=source,
             snapshot_type="fundamentals",
@@ -431,7 +448,9 @@ def detect_flow_changes(db: Session, instrument: Instrument) -> list[Change]:
                 continue
             if index > 1:
                 current_value = sum((row.net_volume for row in pair[:index]), Decimal(0))
-                previous_value = sum((row.net_volume for row in pair[index : index * 2]), Decimal(0))
+                previous_value = sum(
+                    (row.net_volume for row in pair[index : index * 2]), Decimal(0)
+                )
                 current = SimpleNamespace(
                     value=current_value,
                     source_id=pair[0].source_id,
@@ -537,7 +556,11 @@ def detect_event_changes(db: Session, instrument: Instrument) -> list[Change]:
             change_type="new",
         )
         if change:
-            change.metadata_ = {"event_id": event.id, "title": event.title, "source_url": event.source_url}
+            change.metadata_ = {
+                "event_id": event.id,
+                "title": event.title,
+                "source_url": event.source_url,
+            }
             changes.append(change)
     return changes
 

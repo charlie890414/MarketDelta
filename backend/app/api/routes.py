@@ -13,6 +13,7 @@ from app.api.schemas import (
     AlertUpdate,
     ChangeResponse,
     DailyReportResponse,
+    DataSourceResponse,
     EventResponse,
     HistoryPoint,
     InstrumentCreate,
@@ -57,6 +58,40 @@ from app.reports.daily import generate_daily_reports
 router = APIRouter()
 
 
+@router.get("/data-sources", response_model=list[DataSourceResponse])
+def list_data_sources(
+    market: str | None = Query(None, pattern="^(TW|US)$"),
+    domain: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Expose source coverage, including intentionally disabled future feeds."""
+    rows = db.scalars(select(DataSource).order_by(DataSource.code))
+    result = []
+    for source in rows:
+        metadata = source.metadata_ or {}
+        markets = metadata.get("markets", [])
+        domains = metadata.get("domains", [])
+        if market and market not in markets:
+            continue
+        if domain and domain not in domains:
+            continue
+        result.append(
+            DataSourceResponse(
+                code=source.code,
+                name=source.name,
+                source_type=source.source_type,
+                confidence=source.confidence,
+                is_enabled=source.is_enabled,
+                markets=markets,
+                domains=domains,
+                cadence=metadata.get("cadence"),
+                access=metadata.get("access"),
+                url=metadata.get("url"),
+            )
+        )
+    return result
+
+
 def _effective_at(db: Session, change: Change) -> datetime | None:
     """Return the source-data timestamp rather than the pipeline detection time."""
     if change.current_snapshot_id is None:
@@ -77,7 +112,9 @@ def _effective_at(db: Session, change: Change) -> datetime | None:
     if snapshot is None or getattr(snapshot, field) is None:
         return None
     value = getattr(snapshot, field)
-    return value if isinstance(value, datetime) else datetime.combine(value, datetime.min.time(), UTC)
+    return (
+        value if isinstance(value, datetime) else datetime.combine(value, datetime.min.time(), UTC)
+    )
 
 
 @router.get("/health")
@@ -116,9 +153,9 @@ def list_changes(
     if severity:
         query = query.where(Change.severity == severity)
     if watchlist_id:
-        query = query.join(WatchlistItem, WatchlistItem.instrument_id == Change.instrument_id).where(
-            WatchlistItem.watchlist_id == watchlist_id
-        )
+        query = query.join(
+            WatchlistItem, WatchlistItem.instrument_id == Change.instrument_id
+        ).where(WatchlistItem.watchlist_id == watchlist_id)
     return [
         ChangeResponse(
             id=change.id,
@@ -203,7 +240,9 @@ def create_company(payload: InstrumentCreate, db: Session = Depends(get_db)):
     symbol = payload.symbol.strip().upper()
     if not symbol:
         raise HTTPException(422, "Symbol must not be blank")
-    if db.scalar(select(Instrument).where(Instrument.market == payload.market, Instrument.symbol == symbol)):
+    if db.scalar(
+        select(Instrument).where(Instrument.market == payload.market, Instrument.symbol == symbol)
+    ):
         raise HTTPException(409, "Company already exists")
 
     official_profile = lookup_twse_company(symbol) if payload.market == "TW" else None
@@ -235,26 +274,30 @@ def search_companies(
     pattern = f"%{q.strip().lower()}%"
     rows = list(
         db.scalars(
-        select(Instrument)
-        .outerjoin(InstrumentAlias, InstrumentAlias.instrument_id == Instrument.id)
-        .where(
-            Instrument.is_active.is_(True),
-            or_(
-                func.lower(Instrument.symbol).like(pattern),
-                func.lower(Instrument.company_name).like(pattern),
-                func.lower(InstrumentAlias.alias).like(pattern),
-            ),
-        )
-        .distinct()
-        .order_by(Instrument.symbol)
-        .limit(limit)
+            select(Instrument)
+            .outerjoin(InstrumentAlias, InstrumentAlias.instrument_id == Instrument.id)
+            .where(
+                Instrument.is_active.is_(True),
+                or_(
+                    func.lower(Instrument.symbol).like(pattern),
+                    func.lower(Instrument.company_name).like(pattern),
+                    func.lower(InstrumentAlias.alias).like(pattern),
+                ),
+            )
+            .distinct()
+            .order_by(Instrument.symbol)
+            .limit(limit)
         )
     )
     query = q.strip().upper()
     is_tw_symbol = query.isdigit() and len(query) in (4, 6)
     is_us_symbol = query.isalpha() and 1 <= len(query) <= 5
-    if rows or not (is_tw_symbol or is_us_symbol):
+    if not (is_tw_symbol or is_us_symbol):
         return rows
+
+    exact_match = next((row for row in rows if row.symbol.upper() == query), None)
+    if exact_match:
+        return [exact_match]
 
     official_profile = lookup_twse_company(query) if is_tw_symbol else None
     if official_profile:
@@ -278,7 +321,7 @@ def search_companies(
     db.add(instrument)
     db.commit()
     db.refresh(instrument)
-    return [instrument]
+    return [instrument, *rows][:limit]
 
 
 @router.get("/companies/{symbol}", response_model=InstrumentResponse)
@@ -419,7 +462,9 @@ def list_daily_reports(
     limit: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
-    query = select(DailyReport).order_by(desc(DailyReport.report_date), desc(DailyReport.created_at))
+    query = select(DailyReport).order_by(
+        desc(DailyReport.report_date), desc(DailyReport.created_at)
+    )
     if report_type:
         query = query.where(DailyReport.report_type == report_type)
     return list(db.scalars(query.limit(limit)))
@@ -600,9 +645,7 @@ def get_watchlist(watchlist_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/watchlists/{watchlist_id}", response_model=WatchlistResponse)
-def update_watchlist(
-    watchlist_id: int, payload: WatchlistUpdate, db: Session = Depends(get_db)
-):
+def update_watchlist(watchlist_id: int, payload: WatchlistUpdate, db: Session = Depends(get_db)):
     item = db.scalar(select(Watchlist).where(Watchlist.id == watchlist_id))
     if not item:
         raise HTTPException(404, "Watchlist not found")

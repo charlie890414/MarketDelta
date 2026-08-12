@@ -75,14 +75,18 @@ class FixtureProvider:
                 snapshot_date=row["snapshot_date"],
                 holder_bucket=row["holder_bucket"],
                 holder_count=row.get("holder_count"),
-                share_count=Decimal(str(row["share_count"])) if row.get("share_count") is not None else None,
-                ownership_pct=Decimal(str(row["ownership_pct"])) if row.get("ownership_pct") is not None else None,
+                share_count=Decimal(str(row["share_count"]))
+                if row.get("share_count") is not None
+                else None,
+                ownership_pct=Decimal(str(row["ownership_pct"]))
+                if row.get("ownership_pct") is not None
+                else None,
             )
             for row in data
             if row["symbol"] in symbols
         ]
 
-    async def news(self, symbols: list[str]) -> list[NewsObservation]:
+    async def news(self, symbols: list[str], search_terms=None) -> list[NewsObservation]:
         data = json.loads((FIXTURES / "news.json").read_text())
         return [
             NewsObservation(**row)

@@ -71,3 +71,15 @@ Additional runtime settings:
 Useful API groups include `/changes`, `/companies/{symbol}/news`,
 `/companies/{symbol}/ownership`, `/companies/{symbol}/interpretations`,
 `/reports/daily`, `/watchlists`, and `/alerts`.
+
+## Data-source coverage
+
+`GET /data-sources` exposes the source registry, including its covered markets,
+domains, cadence, access method, confidence, and enabled state. Filter it with
+`?market=TW` or `?market=US`, and optionally `&domain=prices` (or
+`fundamentals`, `events`, `ownership`, `macro`, and so on). This makes disabled
+or not-yet-integrated feeds visible rather than silently reporting no data.
+
+With `MCE_USE_LIVE=true` and a `SEC_CIK_MAP`, the SEC submissions API now also
+records 8-K, 10-Q, 10-K, Form 4, 13F-HR, Schedule 13D, and Schedule 13G filings
+as events. The normal pipeline preserves their `sec_filings` provenance.
