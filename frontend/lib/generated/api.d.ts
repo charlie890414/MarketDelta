@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/data-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Data Sources
+         * @description Expose source coverage, including intentionally disabled future feeds.
+         */
+        get: operations["list_data_sources_data_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -192,6 +212,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/daily/ai-generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Ai Report */
+        post: operations["generate_ai_report_reports_daily_ai_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/companies/{symbol}/events": {
         parameters: {
             query?: never;
@@ -243,6 +280,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/news/{news_id}/enrich": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enrich News */
+        post: operations["enrich_news_news__news_id__enrich_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/companies/{symbol}/ownership": {
         parameters: {
             query?: never;
@@ -288,6 +342,24 @@ export interface paths {
         put?: never;
         /** Generate Company Interpretation */
         post: operations["generate_company_interpretation_companies__symbol__interpretations_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/companies/{symbol}/thesis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Company Thesis */
+        get: operations["get_company_thesis_companies__symbol__thesis_get"];
+        /** Upsert Company Thesis */
+        put: operations["upsert_company_thesis_companies__symbol__thesis_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -494,6 +566,12 @@ export interface components {
             watch_next: unknown[];
             /** Thesis Impact */
             thesis_impact: string | null;
+            /** Evidence */
+            evidence: unknown[];
+            /** Confidence */
+            confidence: string | null;
+            /** Data Gaps */
+            data_gaps: unknown[];
             /** Model Provider */
             model_provider: string;
             /** Model Name */
@@ -615,11 +693,11 @@ export interface components {
             /** Current Snapshot Type */
             current_snapshot_type: string | null;
             /** Headline */
-            headline: string | null;
+            headline?: string | null;
             /** Event Title */
-            event_title: string | null;
+            event_title?: string | null;
             /** Effective At */
-            effective_at: string | null;
+            effective_at?: string | null;
             /**
              * Detected At
              * Format: date-time
@@ -648,6 +726,29 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** DataSourceResponse */
+        DataSourceResponse: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Source Type */
+            source_type: string;
+            /** Confidence */
+            confidence: string;
+            /** Is Enabled */
+            is_enabled: boolean;
+            /** Markets */
+            markets: string[];
+            /** Domains */
+            domains: string[];
+            /** Cadence */
+            cadence?: string | null;
+            /** Access */
+            access?: string | null;
+            /** Url */
+            url?: string | null;
         };
         /** EventResponse */
         EventResponse: {
@@ -714,6 +815,46 @@ export interface components {
             /** Currency */
             currency: string;
         };
+        /** InvestmentThesisResponse */
+        InvestmentThesisResponse: {
+            /** Thesis */
+            thesis: string;
+            /** Key Kpis */
+            key_kpis?: string[];
+            /** Catalysts */
+            catalysts?: string[];
+            /** Risks */
+            risks?: string[];
+            /** Invalidation Conditions */
+            invalidation_conditions?: string[];
+            /** Id */
+            id: number;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** InvestmentThesisUpsert */
+        InvestmentThesisUpsert: {
+            /** Thesis */
+            thesis: string;
+            /** Key Kpis */
+            key_kpis?: string[];
+            /** Catalysts */
+            catalysts?: string[];
+            /** Risks */
+            risks?: string[];
+            /** Invalidation Conditions */
+            invalidation_conditions?: string[];
+        };
         /** JobResponse */
         JobResponse: {
             /** Id */
@@ -763,6 +904,14 @@ export interface components {
             is_material: boolean | null;
             /** Summary */
             summary: string | null;
+            /** Article Excerpt */
+            article_excerpt?: string | null;
+            /** Content Status */
+            content_status: string;
+            /** Cluster Key */
+            cluster_key?: string | null;
+            /** Ai Confidence */
+            ai_confidence?: string | null;
         };
         /** OwnershipResponse */
         OwnershipResponse: {
@@ -856,6 +1005,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_data_sources_data_sources_get: {
+        parameters: {
+            query?: {
+                market?: string | null;
+                domain?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_health_get: {
         parameters: {
             query?: never;
@@ -1207,6 +1388,26 @@ export interface operations {
             };
         };
     };
+    generate_ai_report_reports_daily_ai_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportResponse"];
+                };
+            };
+        };
+    };
     company_events_companies__symbol__events_get: {
         parameters: {
             query?: never;
@@ -1273,7 +1474,9 @@ export interface operations {
     };
     company_news_companies__symbol__news_get: {
         parameters: {
-            query?: never;
+            query?: {
+                days?: number;
+            };
             header?: never;
             path: {
                 symbol: string;
@@ -1289,6 +1492,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NewsResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enrich_news_news__news_id__enrich_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                news_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1382,6 +1616,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIInterpretationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_company_thesis_companies__symbol__thesis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentThesisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_company_thesis_companies__symbol__thesis_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentThesisUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestmentThesisResponse"];
                 };
             };
             /** @description Validation Error */

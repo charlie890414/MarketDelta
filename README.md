@@ -49,7 +49,8 @@ source → raw ingestion → normalized snapshot → diff → score → API/UI
 ```
 
 The current interpretation endpoint provides a persisted structured deterministic
-fallback (`POST /companies/{symbol}/interpretations/generate`). External LLM
+fallback (`POST /companies/{symbol}/interpretations/generate`). Its v2 response
+also persists evidence references, confidence, and data gaps. External LLM
 providers can be added without changing objective change fields.
 
 To use the HTTP adapters instead of fixtures, set `MCE_USE_LIVE=true`. US price
@@ -69,8 +70,22 @@ Additional runtime settings:
 - `INITIAL_PRICE_BACKFILL_DAYS`: on the first live pipeline run, import this many days of daily price history (default `90`; set `0` to disable).
 
 Useful API groups include `/changes`, `/companies/{symbol}/news`,
-`/companies/{symbol}/ownership`, `/companies/{symbol}/interpretations`,
+`/news/{news_id}/enrich`, `/companies/{symbol}/ownership`,
+`/companies/{symbol}/interpretations`, `/companies/{symbol}/thesis`,
 `/reports/daily`, `/watchlists`, and `/alerts`.
+
+## AI research workflow
+
+News collection retains the RSS headline but also fetches the linked article
+body with `httpx`. When a publisher page cannot be extracted with ordinary HTTP,
+it falls back to Camoufox. The persisted record marks the retrieval method and
+status; a failed article fetch never removes the original headline observation.
+
+Set `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` to enable structured news
+classification, grounded company interpretations, and the AI daily brief. Without
+an LLM, all three retain deterministic fallbacks. AI output is constrained to
+persisted changes, events, and the user's saved thesis; it does not calculate
+market changes or issue trading recommendations.
 
 ## Data-source coverage
 

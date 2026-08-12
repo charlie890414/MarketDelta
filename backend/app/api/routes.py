@@ -18,6 +18,8 @@ from app.api.schemas import (
     HistoryPoint,
     InstrumentCreate,
     InstrumentResponse,
+    InvestmentThesisResponse,
+    InvestmentThesisUpsert,
     JobResponse,
     NewsResponse,
     OwnershipResponse,
@@ -41,6 +43,7 @@ from app.db.models import (
     FundamentalSnapshot,
     Instrument,
     InstrumentAlias,
+    InvestmentThesis,
     JobRun,
     NewsInstrument,
     NewsItem,
@@ -53,9 +56,29 @@ from app.db.session import get_db
 from app.instruments.registry import lookup_sec_company, lookup_twse_company
 from app.interpretation.service import generate_interpretation
 from app.jobs.pipeline import run_price_history_backfill_sync
+from app.news.service import enrich_news_item
+from app.reports.ai_daily import generate_ai_daily_brief
 from app.reports.daily import generate_daily_reports
 
 router = APIRouter()
+
+
+def _news_response(item: NewsItem) -> NewsResponse:
+    return NewsResponse(
+        id=item.id,
+        headline=item.headline,
+        published_at=item.published_at,
+        source_name=item.source_name,
+        source_url=item.source_url,
+        category=item.category,
+        importance_score=item.importance_score,
+        is_material=item.is_material,
+        summary=item.summary,
+        article_excerpt=item.article_text[:800] if item.article_text else None,
+        content_status=item.content_status,
+        cluster_key=item.cluster_key,
+        ai_confidence=item.ai_confidence,
+    )
 
 
 @router.get("/data-sources", response_model=list[DataSourceResponse])
@@ -477,6 +500,14 @@ def generate_reports(db: Session = Depends(get_db)):
     return reports
 
 
+@router.post("/reports/daily/ai-generate", response_model=DailyReportResponse, status_code=201)
+def generate_ai_report(db: Session = Depends(get_db)):
+    report = generate_ai_daily_brief(db)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
 @router.get("/companies/{symbol}/events", response_model=list[EventResponse])
 def company_events(symbol: str, db: Session = Depends(get_db)):
     instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
@@ -511,7 +542,10 @@ def list_news(
     )
     if category:
         query = query.where(NewsItem.category == category)
-    return list(db.scalars(query.order_by(desc(NewsItem.published_at)).limit(limit)))
+    return [
+        _news_response(item)
+        for item in db.scalars(query.order_by(desc(NewsItem.published_at)).limit(limit))
+    ]
 
 
 @router.get("/companies/{symbol}/news", response_model=list[NewsResponse])
@@ -533,7 +567,18 @@ def company_news(
         .order_by(desc(NewsItem.published_at))
         .limit(100)
     )
-    return list(rows.scalars())
+    return [_news_response(item) for item in rows.scalars()]
+
+
+@router.post("/news/{news_id}/enrich", response_model=NewsResponse)
+async def enrich_news(news_id: int, db: Session = Depends(get_db)):
+    item = db.get(NewsItem, news_id)
+    if not item:
+        raise HTTPException(404, "News item not found")
+    await enrich_news_item(item)
+    db.commit()
+    db.refresh(item)
+    return _news_response(item)
 
 
 @router.get("/companies/{symbol}/ownership", response_model=list[OwnershipResponse])
@@ -583,6 +628,9 @@ def company_interpretations(symbol: str, db: Session = Depends(get_db)):
             contradictions=row.contradictions,
             watch_next=row.watch_next,
             thesis_impact=row.thesis_impact,
+            evidence=row.evidence,
+            confidence=row.confidence,
+            data_gaps=row.data_gaps,
             model_provider=row.model_provider,
             model_name=row.model_name,
             prompt_version=row.prompt_version,
@@ -615,10 +663,77 @@ def generate_company_interpretation(symbol: str, db: Session = Depends(get_db)):
         contradictions=interpretation.contradictions,
         watch_next=interpretation.watch_next,
         thesis_impact=interpretation.thesis_impact,
+        evidence=interpretation.evidence,
+        confidence=interpretation.confidence,
+        data_gaps=interpretation.data_gaps,
         model_provider=interpretation.model_provider,
         model_name=interpretation.model_name,
         prompt_version=interpretation.prompt_version,
         generated_at=interpretation.generated_at,
+    )
+
+
+@router.get("/companies/{symbol}/thesis", response_model=InvestmentThesisResponse)
+def get_company_thesis(symbol: str, db: Session = Depends(get_db)):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    thesis = db.scalar(
+        select(InvestmentThesis).where(InvestmentThesis.instrument_id == instrument.id)
+    )
+    if not thesis:
+        raise HTTPException(404, "Investment thesis not found")
+    return InvestmentThesisResponse(
+        symbol=instrument.symbol,
+        **{
+            key: getattr(thesis, key)
+            for key in (
+                "id",
+                "thesis",
+                "key_kpis",
+                "catalysts",
+                "risks",
+                "invalidation_conditions",
+                "created_at",
+                "updated_at",
+            )
+        },
+    )
+
+
+@router.put("/companies/{symbol}/thesis", response_model=InvestmentThesisResponse)
+def upsert_company_thesis(
+    symbol: str, payload: InvestmentThesisUpsert, db: Session = Depends(get_db)
+):
+    instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
+    if not instrument:
+        raise HTTPException(404, "Company not found")
+    thesis = db.scalar(
+        select(InvestmentThesis).where(InvestmentThesis.instrument_id == instrument.id)
+    )
+    if not thesis:
+        thesis = InvestmentThesis(instrument_id=instrument.id, **payload.model_dump())
+        db.add(thesis)
+    else:
+        for key, value in payload.model_dump().items():
+            setattr(thesis, key, value)
+    db.commit()
+    db.refresh(thesis)
+    return InvestmentThesisResponse(
+        symbol=instrument.symbol,
+        **{
+            key: getattr(thesis, key)
+            for key in (
+                "id",
+                "thesis",
+                "key_kpis",
+                "catalysts",
+                "risks",
+                "invalidation_conditions",
+                "created_at",
+                "updated_at",
+            )
+        },
     )
 
 

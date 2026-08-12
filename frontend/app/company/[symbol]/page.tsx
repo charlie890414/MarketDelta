@@ -1,14 +1,15 @@
 import Link from "next/link";
-import { getCompany, getCompanyChanges, getCompanyEvents, getCompanyHistory, getCompanyInterpretations, getCompanyNews, getCompanyOwnership } from "../../../lib/api";
+import { getCompany, getCompanyChanges, getCompanyEvents, getCompanyHistory, getCompanyInterpretations, getCompanyNews, getCompanyOwnership, getCompanyThesis } from "../../../lib/api";
 import { changeDescription, changeDetails, changeTitle } from "../../../lib/change-copy";
 import InterpretationActions from "./InterpretationActions";
+import ThesisEditor from "./ThesisEditor";
 
 export const dynamic = "force-dynamic";
 
 export default async function Company({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
   try {
-    const [company, changes, history, interpretations, news, ownership, events] = await Promise.all([
+    const [company, changes, history, interpretations, news, ownership, events, thesisResult] = await Promise.all([
       getCompany(symbol),
       getCompanyChanges(symbol),
       getCompanyHistory(symbol),
@@ -16,6 +17,7 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
       getCompanyNews(symbol),
       getCompanyOwnership(symbol),
       getCompanyEvents(symbol),
+      getCompanyThesis(symbol).catch(() => undefined),
     ]);
     return <main className="main">
       <Link className="eyebrow" href="/dashboard">← 返回訊號列表</Link>
@@ -54,6 +56,11 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
         <div className="history-list">{events.slice(0, 8).map((event) => <div className="history-row" key={event.id}><span className="history-date">{event.event_date ?? "待定"}</span><span className="history-metric">{event.title}</span><span className="history-unit">{event.event_type}</span></div>)}</div>
       </section>
       <section className="history-block">
+        <div className="eyebrow">投資 Thesis</div>
+        <p className="lede">AI 只會依照你定義的論點、KPI、風險與失效條件，評估新訊號的影響。</p>
+        <ThesisEditor symbol={symbol} initial={thesisResult} />
+      </section>
+      <section className="history-block">
         <div className="eyebrow">AI 解讀</div>
         <InterpretationActions symbol={symbol} />
         {interpretations.length ? interpretations.slice(0, 3).map((item) => <article className="empty" key={item.id}>
@@ -61,12 +68,14 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
           {item.supporting_signals.length > 0 && <><br /><span className="history-unit">支持訊號：{item.supporting_signals.join(" · ")}</span></>}
           {item.contradictions.length > 0 && <><br /><span className="history-unit">相反訊號：{item.contradictions.join(" · ")}</span></>}
           {item.watch_next.length > 0 && <><br /><span className="history-unit">後續觀察：{item.watch_next.join(" · ")}</span></>}
+          {item.evidence.length > 0 && <><br /><span className="history-unit">證據：{item.evidence.map((e) => typeof e === "object" && e && "id" in e ? `#${String(e.id)}` : "已引用資料").join(" · ")} · 信心 {item.confidence ?? "未標示"}</span></>}
+          {item.data_gaps.length > 0 && <><br /><span className="history-unit">資料缺口：{item.data_gaps.join(" · ")}</span></>}
         </article>) : <div className="empty">尚未產生解讀；上方仍可查看客觀變化。</div>}
       </section>
       <section className="history-block">
         <div className="eyebrow">新聞 / 持股</div>
         <div className="history-list">
-          {news.slice(0, 5).map((item) => <div className="history-row" key={item.id}><span className="history-date">{new Date(item.published_at).toLocaleDateString("zh-TW")}</span><span className="history-metric">{item.headline}</span><span className="history-unit">{item.source_name ?? "來源"}</span></div>)}
+          {news.slice(0, 5).map((item) => <div className="history-row" key={item.id}><span className="history-date">{new Date(item.published_at).toLocaleDateString("zh-TW")}</span><span className="history-metric">{item.headline}{item.article_excerpt && <small>{item.article_excerpt.slice(0, 180)}…</small>}</span><span className="history-unit">{item.source_name ?? "來源"} · {item.content_status}</span></div>)}
           {ownership.slice(0, 5).map((item) => <div className="history-row" key={`ownership-${item.id}`}><span className="history-date">{item.snapshot_date}</span><span className="history-metric">{item.holder_bucket}</span><strong>{item.ownership_pct ?? "-"}%</strong><span className="history-unit">持股</span></div>)}
         </div>
       </section>

@@ -222,3 +222,27 @@ export async function generateCompanyInterpretation(symbol: string) {
   if (error || !data) throw new Error("Interpretation generation failed");
   return data;
 }
+
+export async function getCompanyThesis(symbol: string) {
+  const { data, error } = await client.GET("/companies/{symbol}/thesis", {
+    params: { path: { symbol } },
+  });
+  if (error || !data) throw new Error("Thesis unavailable");
+  return data;
+}
+
+export async function saveCompanyThesis(symbol: string, body: {
+  thesis: string; key_kpis: string[]; catalysts: string[]; risks: string[]; invalidation_conditions: string[];
+}) {
+  const { data, error } = await client.PUT("/companies/{symbol}/thesis", {
+    params: { path: { symbol } }, body,
+  });
+  if (error || !data) throw new Error("Thesis save failed");
+  return data;
+}
+
+export async function generateAIDailyBrief() {
+  const { data, error } = await client.POST("/reports/daily/ai-generate");
+  if (error || !data) throw new Error("AI daily brief generation failed");
+  return data;
+}

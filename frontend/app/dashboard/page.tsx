@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getChanges, getDailyReports, getWatchlists, type Change } from "../../lib/api";
 import { changeDescription, changeDetails } from "../../lib/change-copy";
+import AIBriefActions from "./AIBriefActions";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   const watchlistId = first(params.watchlist_id);
   let changes = [] as Awaited<ReturnType<typeof getChanges>>;
   let reports = [] as Awaited<ReturnType<typeof getDailyReports>>;
+  let aiReports = [] as Awaited<ReturnType<typeof getDailyReports>>;
   const [changeResult, reportResult, watchlistResult] = await Promise.allSettled([
     getChanges({ market, category, severity, watchlistId: watchlistId ? Number(watchlistId) : undefined }),
     getDailyReports("market"),
@@ -43,6 +45,8 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   ]);
   if (changeResult.status === "fulfilled") changes = changeResult.value;
   if (reportResult.status === "fulfilled") reports = reportResult.value;
+  const aiReportResult = await Promise.allSettled([getDailyReports("ai_market")]);
+  if (aiReportResult[0].status === "fulfilled") aiReports = aiReportResult[0].value;
   const watchlists = watchlistResult.status === "fulfilled" ? watchlistResult.value : [];
 
   const filters = [
@@ -97,6 +101,11 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
           {highlights.map((change) => <Link className="highlight" href={`/company/${change.symbol}`} key={`highlight-${change.id}`}><i className={`rail ${change.direction === "down" ? "down" : ""}`} /><div className="ticker">{change.symbol}<span className="market-label">{change.market}</span></div><div className="metric">{changeDescription(change)}<span>{changeDetails(change)}</span></div><div className="score"><strong>{Math.round(change.total_score)}</strong>{change.severity === "critical" ? "關鍵" : "高優先"}</div></Link>)}
         </div>
       </section>}
+      <section className="history-block">
+        <div className="eyebrow">AI Market Brief</div>
+        <AIBriefActions />
+        {aiReports[0] ? <div className="metric">{String((aiReports[0].payload as { summary?: string }).summary ?? "")}<span>僅使用已儲存的變化與催化事件；非投資建議。</span></div> : <div className="empty">尚未產生 AI Daily Brief。</div>}
+      </section>
       <section className="signal-section" id="all-signals">
         <div className="section-heading"><div><div className="eyebrow">全部訊號</div><h2>{isFiltered ? "篩選結果" : "可點入追查完整資料"}</h2></div><span className="section-count">{changes.length} 個訊號</span></div>
         <div className="feed">

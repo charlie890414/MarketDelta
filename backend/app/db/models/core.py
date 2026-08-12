@@ -205,7 +205,9 @@ class MacroSnapshot(Base):
 
 class CorporateAction(Base):
     __tablename__ = "corporate_actions"
-    __table_args__ = (UniqueConstraint("instrument_id", "source_id", "action_type", "ex_date", "external_id"),)
+    __table_args__ = (
+        UniqueConstraint("instrument_id", "source_id", "action_type", "ex_date", "external_id"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
@@ -272,6 +274,11 @@ class NewsItem(Base):
     importance_score: Mapped[float | None] = mapped_column()
     is_material: Mapped[bool | None] = mapped_column(Boolean)
     summary: Mapped[str | None] = mapped_column(Text)
+    article_text: Mapped[str | None] = mapped_column(Text)
+    content_status: Mapped[str] = mapped_column(String(32), default="pending")
+    content_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cluster_key: Mapped[str | None] = mapped_column(String(128), index=True)
+    ai_confidence: Mapped[str | None] = mapped_column(String(16))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -336,6 +343,9 @@ class AIInterpretation(Base):
     contradictions: Mapped[list] = mapped_column(JSONB, default=list)
     watch_next: Mapped[list] = mapped_column(JSONB, default=list)
     thesis_impact: Mapped[str | None] = mapped_column(String(32))
+    evidence: Mapped[list] = mapped_column(JSONB, default=list)
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    data_gaps: Mapped[list] = mapped_column(JSONB, default=list)
     model_provider: Mapped[str] = mapped_column(String(64))
     model_name: Mapped[str] = mapped_column(String(128))
     prompt_version: Mapped[str] = mapped_column(String(64))
@@ -347,6 +357,26 @@ class AIInterpretationChange(Base):
     __tablename__ = "ai_interpretation_changes"
     interpretation_id: Mapped[int] = mapped_column(
         ForeignKey("ai_interpretations.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class InvestmentThesis(Base):
+    __tablename__ = "investment_theses"
+    __table_args__ = (
+        Index("ix_investment_theses_instrument_updated_at", "instrument_id", "updated_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(
+        ForeignKey("instruments.id", ondelete="CASCADE"), unique=True
+    )
+    thesis: Mapped[str] = mapped_column(Text)
+    key_kpis: Mapped[list] = mapped_column(JSONB, default=list)
+    catalysts: Mapped[list] = mapped_column(JSONB, default=list)
+    risks: Mapped[list] = mapped_column(JSONB, default=list)
+    invalidation_conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     change_id: Mapped[int] = mapped_column(
         ForeignKey("changes.id", ondelete="CASCADE"), primary_key=True

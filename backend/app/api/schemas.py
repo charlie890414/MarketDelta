@@ -124,6 +124,10 @@ class NewsResponse(BaseModel):
     importance_score: float | None
     is_material: bool | None
     summary: str | None
+    article_excerpt: str | None = None
+    content_status: str
+    cluster_key: str | None = None
+    ai_confidence: str | None = None
 
 
 class OwnershipResponse(BaseModel):
@@ -148,6 +152,9 @@ class AIInterpretationResponse(BaseModel):
     contradictions: list
     watch_next: list
     thesis_impact: str | None
+    evidence: list
+    confidence: str | None
+    data_gaps: list
     model_provider: str
     model_name: str
     prompt_version: str
@@ -207,3 +214,19 @@ class DailyReportResponse(BaseModel):
     title: str
     payload: dict
     created_at: datetime
+
+
+class InvestmentThesisUpsert(BaseModel):
+    thesis: str = Field(min_length=1, max_length=10000)
+    key_kpis: list[str] = Field(default_factory=list, max_length=20)
+    catalysts: list[str] = Field(default_factory=list, max_length=20)
+    risks: list[str] = Field(default_factory=list, max_length=20)
+    invalidation_conditions: list[str] = Field(default_factory=list, max_length=20)
+
+
+class InvestmentThesisResponse(InvestmentThesisUpsert):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    symbol: str
+    created_at: datetime
+    updated_at: datetime

@@ -6,9 +6,15 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.models import AIInterpretation, AIInterpretationChange, Change, Instrument
+from app.db.models import (
+    AIInterpretation,
+    AIInterpretationChange,
+    Change,
+    Instrument,
+    InvestmentThesis,
+)
 
-PROMPT_VERSION = "change-interpretation-v1"
+PROMPT_VERSION = "change-interpretation-v2-grounded"
 
 
 class InterpretationOutput(BaseModel):
@@ -18,6 +24,23 @@ class InterpretationOutput(BaseModel):
     contradictions: list[str] = Field(default_factory=list, max_length=10)
     watch_next: list[str] = Field(default_factory=list, max_length=10)
     thesis_impact: str = Field(pattern="^(strengthened|weakened|mixed|unknown)$")
+    evidence: list[dict] = Field(default_factory=list, max_length=20)
+    confidence: str = Field(default="medium", pattern="^(high|medium|low)$")
+    data_gaps: list[str] = Field(default_factory=list, max_length=10)
+
+
+def _evidence(changes: list[Change]) -> list[dict]:
+    return [
+        {
+            "type": "change",
+            "id": change.id,
+            "metric": change.metric,
+            "direction": change.direction,
+            "score": round(change.total_score, 1),
+            "observed_at": change.detected_at.isoformat(),
+        }
+        for change in changes
+    ]
 
 
 def _deterministic_output(instrument: Instrument, changes: list[Change]) -> InterpretationOutput:
@@ -38,20 +61,24 @@ def _deterministic_output(instrument: Instrument, changes: list[Change]) -> Inte
             "Review the next scheduled event",
             "Check whether the highest-score signal persists",
         ],
-        thesis_impact="strengthened"
-        if len(positive) > len(negative)
-        else "weakened"
-        if negative
+        thesis_impact=("strengthened" if len(positive) > len(negative) else "weakened")
+        if positive or negative
         else "unknown",
+        evidence=_evidence(changes),
+        confidence="medium" if len(changes) >= 3 else "low",
+        data_gaps=["No user-defined investment thesis"],
     )
 
 
-def _llm_output(instrument: Instrument, changes: list[Change]) -> InterpretationOutput | None:
+def _llm_output(
+    instrument: Instrument, changes: list[Change], thesis: InvestmentThesis | None
+) -> InterpretationOutput | None:
     settings = get_settings()
     if not settings.llm_base_url or not settings.llm_api_key:
         return None
     signals = [
         {
+            "id": change.id,
             "category": change.category,
             "metric": change.metric,
             "period": change.period,
@@ -61,6 +88,17 @@ def _llm_output(instrument: Instrument, changes: list[Change]) -> Interpretation
         }
         for change in changes
     ]
+    thesis_context = (
+        {
+            "thesis": thesis.thesis,
+            "key_kpis": thesis.key_kpis,
+            "catalysts": thesis.catalysts,
+            "risks": thesis.risks,
+            "invalidation_conditions": thesis.invalidation_conditions,
+        }
+        if thesis
+        else None
+    )
     payload = {
         "model": settings.llm_model,
         "temperature": 0,
@@ -70,14 +108,20 @@ def _llm_output(instrument: Instrument, changes: list[Change]) -> Interpretation
                 "role": "system",
                 "content": (
                     "You summarize objective market signals. Do not invent facts or predict prices. "
+                    "Every material claim must cite one or more supplied change ids in evidence. "
+                    "If the signals cannot establish a conclusion, say so and use low confidence. "
                     "Return only JSON with keys: summary, why_it_matters, supporting_signals, "
-                    "contradictions, watch_next, thesis_impact. thesis_impact must be one of "
-                    "strengthened, weakened, mixed, unknown."
+                    "contradictions, watch_next, thesis_impact, evidence, confidence, data_gaps. "
+                    "evidence is objects containing type='change' and supplied id. thesis_impact must be one "
+                    "of strengthened, weakened, mixed, unknown."
                 ),
             },
             {
                 "role": "user",
-                "content": f"Instrument: {instrument.symbol} ({instrument.company_name})\nSignals: {signals}",
+                "content": (
+                    f"Instrument: {instrument.symbol} ({instrument.company_name})\n"
+                    f"Signals: {signals}\nUser thesis: {thesis_context}"
+                ),
             },
         ],
     }
@@ -108,10 +152,20 @@ def generate_interpretation(db: Session, instrument: Instrument) -> AIInterpreta
     if not changes:
         return None
 
-    output = _llm_output(instrument, changes) or _deterministic_output(instrument, changes)
-    model_provider = (
-        "openai-compatible" if settings.llm_base_url and settings.llm_api_key else "deterministic"
+    thesis = db.scalar(
+        select(InvestmentThesis).where(InvestmentThesis.instrument_id == instrument.id)
     )
+    llm_output = _llm_output(instrument, changes, thesis)
+    output = llm_output or _deterministic_output(instrument, changes)
+    allowed_change_ids = {change.id for change in changes}
+    grounded_evidence = [
+        item
+        for item in output.evidence
+        if item.get("type") == "change" and item.get("id") in allowed_change_ids
+    ]
+    if not grounded_evidence:
+        grounded_evidence = _evidence(changes)
+    model_provider = "openai-compatible" if llm_output else "deterministic"
     model_name = settings.llm_model if model_provider != "deterministic" else "rule-based-v1"
     interpretation = AIInterpretation(
         instrument_id=instrument.id,
@@ -122,6 +176,11 @@ def generate_interpretation(db: Session, instrument: Instrument) -> AIInterpreta
         contradictions=output.contradictions,
         watch_next=output.watch_next,
         thesis_impact=output.thesis_impact,
+        evidence=grounded_evidence,
+        confidence=output.confidence,
+        data_gaps=output.data_gaps
+        if thesis
+        else [*output.data_gaps, "No user-defined investment thesis"],
         model_provider=model_provider,
         model_name=model_name,
         prompt_version=PROMPT_VERSION if model_provider != "deterministic" else "none",
@@ -130,6 +189,7 @@ def generate_interpretation(db: Session, instrument: Instrument) -> AIInterpreta
             "source": "changes",
             "change_count": len(changes),
             "llm_enabled": model_provider != "deterministic",
+            "thesis_id": thesis.id if thesis else None,
         },
     )
     db.add(interpretation)

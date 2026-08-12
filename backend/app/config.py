@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 20.0
     initial_price_backfill_days: int = 90
     news_max_age_days: int = 7
+    news_content_max_chars: int = 20000
+    news_content_timeout_seconds: float = 15.0
+    news_camoufox_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

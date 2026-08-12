@@ -39,9 +39,11 @@ from app.db.models import (
     WatchlistItem,
 )
 from app.db.session import SessionLocal
+from app.news.service import enrich_news_item
 from app.providers.base import Provider
 from app.providers.fixture import FixtureProvider
 from app.providers.live import LiveProvider, _latest_closed_us_trading_date
+from app.reports.ai_daily import generate_ai_daily_brief
 from app.reports.daily import generate_daily_reports
 from app.scoring.scorer import WEIGHTS, freshness_score, severity
 
@@ -665,6 +667,9 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             )
             db.add(item)
             db.flush()
+            # Article bodies are fetched through httpx first and Camoufox only when needed.
+            # A failed publisher page remains a valid headline observation.
+            await enrich_news_item(item)
             if instrument:
                 db.add(
                     NewsInstrument(
@@ -688,6 +693,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         db.flush()
         _refresh_news_scores(db)
         generate_daily_reports(db)
+        generate_ai_daily_brief(db)
         evaluate_alerts(db)
         job.finished_at = datetime.now(UTC)
         job.status = "partial" if errors else "success"
