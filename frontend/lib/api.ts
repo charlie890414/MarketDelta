@@ -30,6 +30,14 @@ export async function getChanges(
   return data;
 }
 
+export async function getChange(changeId: number): Promise<Change> {
+  const { data, error } = await client.GET("/changes/{change_id}", {
+    params: { path: { change_id: changeId } },
+  });
+  if (error || !data) throw new Error("Change unavailable");
+  return data;
+}
+
 export async function getCompany(symbol: string) {
   const { data, error } = await client.GET("/companies/{symbol}", { params: { path: { symbol } } });
   if (error || !data) throw new Error("Company unavailable");
@@ -45,6 +53,12 @@ export async function getCompanyChanges(symbol: string): Promise<Change[]> {
 export async function getCompanyHistory(symbol: string) {
   const { data, error } = await client.GET("/companies/{symbol}/history", { params: { path: { symbol } } });
   if (error || !data) throw new Error("Company history unavailable");
+  return data;
+}
+
+export async function getCompanyEvents(symbol: string) {
+  const { data, error } = await client.GET("/companies/{symbol}/events", { params: { path: { symbol } } });
+  if (error || !data) throw new Error("Company events unavailable");
   return data;
 }
 
@@ -98,6 +112,28 @@ export async function getAlerts() {
   const { data, error } = await client.GET("/alerts");
   if (error || !data) throw new Error("Alerts unavailable");
   return data;
+}
+
+export async function updateAlert(alertId: number, body: {
+  name?: string;
+  min_score?: number;
+  category?: string | null;
+  market?: string | null;
+  is_enabled?: boolean;
+}) {
+  const { data, error } = await client.PATCH("/alerts/{alert_id}", {
+    params: { path: { alert_id: alertId } },
+    body,
+  });
+  if (error || !data) throw new Error("Alert update failed");
+  return data;
+}
+
+export async function deleteAlert(alertId: number) {
+  const { error } = await client.DELETE("/alerts/{alert_id}", {
+    params: { path: { alert_id: alertId } },
+  });
+  if (error) throw new Error("Alert deletion failed");
 }
 
 export async function createWatchlist(name: string, description?: string) {

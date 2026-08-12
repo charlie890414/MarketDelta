@@ -8,8 +8,11 @@ from sqlalchemy import select
 from app.alerts.service import dispatch_alerts, evaluate_alerts
 from app.changes.engine import (
     detect_estimate_changes,
+    detect_event_changes,
     detect_flow_changes,
     detect_fundamental_changes,
+    detect_news_changes,
+    detect_ownership_changes,
     detect_price_changes,
 )
 from app.config import get_settings
@@ -279,6 +282,9 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             candidates.extend(detect_estimate_changes(db, instrument))
             candidates.extend(detect_fundamental_changes(db, instrument))
             candidates.extend(detect_flow_changes(db, instrument))
+            candidates.extend(detect_ownership_changes(db, instrument))
+            candidates.extend(detect_event_changes(db, instrument))
+            candidates.extend(detect_news_changes(db, instrument))
         changes_inserted = 0
         for change in candidates:
             duplicate = db.scalar(select(Change).where(

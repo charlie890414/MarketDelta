@@ -1,16 +1,20 @@
 import Link from "next/link";
-import { getCompany, getCompanyChanges, getCompanyHistory, getCompanyInterpretations, getCompanyNews, getCompanyOwnership } from "../../../lib/api";
+import { getCompany, getCompanyChanges, getCompanyEvents, getCompanyHistory, getCompanyInterpretations, getCompanyNews, getCompanyOwnership } from "../../../lib/api";
+import InterpretationActions from "./InterpretationActions";
+
+export const dynamic = "force-dynamic";
 
 export default async function Company({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
   try {
-    const [company, changes, history, interpretations, news, ownership] = await Promise.all([
+    const [company, changes, history, interpretations, news, ownership, events] = await Promise.all([
       getCompany(symbol),
       getCompanyChanges(symbol),
       getCompanyHistory(symbol),
       getCompanyInterpretations(symbol),
       getCompanyNews(symbol),
       getCompanyOwnership(symbol),
+      getCompanyEvents(symbol),
     ]);
     return <main className="main">
       <Link className="eyebrow" href="/dashboard">← back to feed</Link>
@@ -42,9 +46,17 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
         </div>
       </section>
       <section className="history-block">
+        <div className="eyebrow">Upcoming catalysts</div>
+        <div className="history-list">{events.slice(0, 8).map((event) => <div className="history-row" key={event.id}><span className="history-date">{event.event_date ?? "TBD"}</span><span className="history-metric">{event.title}</span><span className="history-unit">{event.event_type}</span></div>)}</div>
+      </section>
+      <section className="history-block">
         <div className="eyebrow">AI interpretation</div>
+        <InterpretationActions symbol={symbol} />
         {interpretations.length ? interpretations.slice(0, 3).map((item) => <article className="empty" key={item.id}>
-          <strong>{item.summary}</strong><br />{item.why_it_matters}<br /><span className="history-unit">{item.model_provider} / {item.model_name} · AI-generated</span>
+          <strong>{item.summary}</strong><br />{item.why_it_matters}<br /><span className="history-unit">{item.model_provider} / {item.model_name} · generated {new Date(item.generated_at).toLocaleString()}</span>
+          {item.supporting_signals.length > 0 && <><br /><span className="history-unit">Supporting: {item.supporting_signals.join(" · ")}</span></>}
+          {item.contradictions.length > 0 && <><br /><span className="history-unit">Contradictions: {item.contradictions.join(" · ")}</span></>}
+          {item.watch_next.length > 0 && <><br /><span className="history-unit">Watch next: {item.watch_next.join(" · ")}</span></>}
         </article>) : <div className="empty">No interpretation generated. Objective changes remain available above.</div>}
       </section>
       <section className="history-block">

@@ -7,6 +7,8 @@ import {
   createWatchlist,
   deleteWatchlist,
   getWatchlists,
+  getWatchlistItems,
+  removeWatchlistItem,
   searchCompanies,
 } from "../../lib/api";
 
@@ -19,9 +21,13 @@ export default function WatchlistManager() {
   const [selectedList, setSelectedList] = useState<number>();
   const [matches, setMatches] = useState<Awaited<ReturnType<typeof searchCompanies>>>([]);
   const [message, setMessage] = useState("");
+  const [items, setItems] = useState<Record<number, Awaited<ReturnType<typeof getWatchlistItems>>>>({});
 
   async function refresh() {
-    setLists(await getWatchlists());
+    const nextLists = await getWatchlists();
+    setLists(nextLists);
+    const entries = await Promise.all(nextLists.map(async (list) => [list.id, await getWatchlistItems(list.id)] as const));
+    setItems(Object.fromEntries(entries));
   }
 
   useEffect(() => {
@@ -61,8 +67,18 @@ export default function WatchlistManager() {
       setMessage(`${symbolToAdd} added.`);
       setMatches([]);
       setSymbol("");
+      await refresh();
     } catch {
       setMessage("Could not add instrument.");
+    }
+  }
+
+  async function removeItem(watchlistId: number, instrumentId: number) {
+    try {
+      await removeWatchlistItem(watchlistId, instrumentId);
+      setItems((current) => ({ ...current, [watchlistId]: (current[watchlistId] ?? []).filter((item) => item.instrument_id !== instrumentId) }));
+    } catch {
+      setMessage("Could not remove instrument.");
     }
   }
 
@@ -100,6 +116,7 @@ export default function WatchlistManager() {
         <div className="ticker">{list.name}</div>
         <div className="metric">{list.description ?? "No description"}</div>
         <button className="pill" onClick={() => remove(list.id)}>DELETE</button>
+        <div className="history-list">{(items[list.id] ?? []).map((item) => <div className="history-row" key={item.instrument_id}><span className="history-metric">{item.symbol}</span><span>{item.company_name}</span><button className="pill" onClick={() => removeItem(list.id, item.instrument_id)}>REMOVE</button></div>)}</div>
       </div>)}
       {message && <div className="empty">{message}</div>}
     </section>

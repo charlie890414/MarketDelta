@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     benchmark_symbols: str = '{"US":"SPY","TW":"0050"}'
     alert_webhook_retries: int = 3
     alert_webhook_backoff_seconds: float = 1.0
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = 20.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

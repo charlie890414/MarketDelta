@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/changes/{change_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Change */
+        get: operations["get_change_changes__change_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/companies": {
         parameters: {
             query?: never;
@@ -383,6 +400,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/alerts/{alert_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Alert */
+        delete: operations["delete_alert_alerts__alert_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Alert */
+        patch: operations["update_alert_alerts__alert_id__patch"];
+        trace?: never;
+    };
     "/alerts/deliveries": {
         parameters: {
             query?: never;
@@ -522,6 +557,19 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** AlertUpdate */
+        AlertUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Min Score */
+            min_score?: number | null;
+            /** Category */
+            category?: string | null;
+            /** Market */
+            market?: string | null;
+            /** Is Enabled */
+            is_enabled?: boolean | null;
         };
         /** ChangeResponse */
         ChangeResponse: {
@@ -832,6 +880,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_changes__change_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1571,6 +1650,70 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_alert_alerts__alert_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_alert_alerts__alert_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alert_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlertUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

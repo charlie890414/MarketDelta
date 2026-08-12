@@ -1,6 +1,8 @@
 import { getWatchlistItems, getWatchlists } from "../../lib/api";
 import WatchlistManager from "./WatchlistManager";
 
+export const dynamic = "force-dynamic";
+
 export default async function Watchlist() {
   try {
     const lists = await getWatchlists();

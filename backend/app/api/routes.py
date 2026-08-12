@@ -10,6 +10,7 @@ from app.api.schemas import (
     AlertCreate,
     AlertDeliveryResponse,
     AlertResponse,
+    AlertUpdate,
     ChangeResponse,
     DailyReportResponse,
     EventResponse,
@@ -112,6 +113,42 @@ def list_changes(
         )
         for change, instrument, source in db.execute(query)
     ]
+
+
+@router.get("/changes/{change_id}", response_model=ChangeResponse)
+def get_change(change_id: int, db: Session = Depends(get_db)):
+    row = db.execute(
+        select(Change, Instrument, DataSource)
+        .join(Instrument, Instrument.id == Change.instrument_id)
+        .outerjoin(DataSource, DataSource.id == Change.source_id)
+        .where(Change.id == change_id)
+    ).first()
+    if not row:
+        raise HTTPException(404, "Change not found")
+    change, instrument, source = row
+    return ChangeResponse(
+        id=change.id,
+        symbol=instrument.symbol,
+        company_name=instrument.company_name,
+        market=instrument.market,
+        category=change.category,
+        metric=change.metric,
+        period=change.period,
+        lookback=change.lookback,
+        previous_value=change.previous_value,
+        current_value=change.current_value,
+        absolute_change=change.absolute_change,
+        percentage_change=change.percentage_change,
+        direction=change.direction,
+        severity=change.severity,
+        total_score=change.total_score,
+        source_code=source.code if source else None,
+        source_name=source.name if source else None,
+        source_confidence=source.confidence if source else None,
+        previous_snapshot_type=change.previous_snapshot_type,
+        current_snapshot_type=change.current_snapshot_type,
+        detected_at=change.detected_at,
+    )
 
 
 @router.get("/companies", response_model=list[InstrumentResponse])
@@ -569,6 +606,30 @@ def create_alert(payload: AlertCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(alert)
     return alert
+
+
+@router.patch("/alerts/{alert_id}", response_model=AlertResponse)
+def update_alert(alert_id: int, payload: AlertUpdate, db: Session = Depends(get_db)):
+    alert = db.scalar(select(Alert).where(Alert.id == alert_id))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    values = payload.model_dump(exclude_unset=True)
+    if values.get("market"):
+        values["market"] = values["market"].upper()
+    for key, value in values.items():
+        setattr(alert, key, value)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+@router.delete("/alerts/{alert_id}", status_code=204)
+def delete_alert(alert_id: int, db: Session = Depends(get_db)):
+    alert = db.scalar(select(Alert).where(Alert.id == alert_id))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    db.delete(alert)
+    db.commit()
 
 
 @router.get("/alerts/deliveries", response_model=list[AlertDeliveryResponse])

@@ -136,6 +136,14 @@ class AlertCreate(BaseModel):
     market: str | None = None
 
 
+class AlertUpdate(BaseModel):
+    name: str | None = None
+    min_score: float | None = None
+    category: str | None = None
+    market: str | None = None
+    is_enabled: bool | None = None
+
+
 class AlertResponse(AlertCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int

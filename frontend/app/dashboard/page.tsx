@@ -1,8 +1,16 @@
 import Link from "next/link";
-import { getAlertDeliveries, getChanges, getDailyReports } from "../../lib/api";
+import { getAlertDeliveries, getChanges, getDailyReports, type Change } from "../../lib/api";
+
+export const dynamic = "force-dynamic";
 
 type DashboardProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type ReportPayload = {
+  biggest_positive?: Change[];
+  biggest_negative?: Change[];
+  upcoming_catalysts?: { id: number; event_date: string | null; title: string }[];
 };
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -49,6 +57,7 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date());
+  const reportPayload = (reports[0]?.payload ?? {}) as ReportPayload;
 
   return (
     <main className="main">
@@ -64,6 +73,13 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
       {reports[0] && <section className="history-block">
         <div className="eyebrow">Daily report / {reports[0].report_date}</div>
         <div className="metric">{reports[0].title}<span>Persisted deterministic digest · {deliveries.length} alert deliveries</span></div>
+      </section>}
+      {reports[0]?.payload && <section className="history-block">
+        <div className="eyebrow">Signal balance</div>
+        <div className="history-list">
+          {[...(reportPayload.biggest_positive ?? []), ...(reportPayload.biggest_negative ?? [])].slice(0, 10).map((item) => <div className="history-row" key={`report-${item.id}`}><span className="history-metric">{item.symbol}</span><span>{item.metric.replaceAll("_", " ")}</span><strong className={item.direction === "down" ? "negative" : ""}>{item.percentage_change == null ? "NEW" : `${item.percentage_change.toFixed(2)}%`}</strong></div>)}
+          {(reportPayload.upcoming_catalysts ?? []).slice(0, 5).map((event) => <div className="history-row" key={`event-${event.id}`}><span className="history-date">{event.event_date ?? "TBD"}</span><span className="history-metric">{event.title}</span><span className="history-unit">CATALYST</span></div>)}
+        </div>
       </section>}
       <section className="feed">
         {changes.length ? changes.map((change) => (

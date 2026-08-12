@@ -14,9 +14,13 @@ from app.db.models import (
     Change,
     DataSource,
     EstimateSnapshot,
+    Event,
     FlowDaily,
     FundamentalSnapshot,
     Instrument,
+    NewsInstrument,
+    NewsItem,
+    OwnershipSnapshot,
     PriceDaily,
 )
 from app.domain.observations import ChangeCandidate
@@ -190,6 +194,31 @@ def detect_price_changes(db: Session, instrument: Instrument) -> list[Change]:
         )
         if volume_change:
             changes.append(volume_change)
+        average_volume = sum((row.volume or 0 for row in rows[1:21]), Decimal(0)) / min(len(rows[1:21]), 20)
+        relative_volume = _make_change(
+            instrument,
+            SimpleNamespace(
+                value=rows[0].volume,
+                source_id=rows[0].source_id,
+                id=rows[0].id,
+                trading_date=rows[0].trading_date,
+            ),
+            SimpleNamespace(
+                value=average_volume,
+                source_id=rows[1].source_id,
+                id=rows[1].id,
+                trading_date=rows[1].trading_date,
+            ),
+            category="price",
+            metric="relative_volume",
+            period="20d",
+            source=source,
+            snapshot_type="price_daily",
+            lookback="20d",
+            value_getter=lambda row: row.value,
+        )
+        if relative_volume:
+            changes.append(relative_volume)
     if len(rows) >= 21:
         current_volatility = Decimal(str(pstdev(float(row.close) for row in rows[:5])))
         previous_volatility = Decimal(str(pstdev(float(row.close) for row in rows[5:10])))
@@ -399,12 +428,29 @@ def detect_flow_changes(db: Session, instrument: Instrument) -> list[Change]:
             continue
         source = db.get(DataSource, pair[0].source_id)
         for lookback, index in (("previous", 1), ("5d", 5), ("20d", 20)):
-            if len(pair) <= index:
+            if len(pair) <= index or (index > 1 and len(pair) < index * 2):
                 continue
+            if index > 1:
+                current_value = sum((row.net_volume for row in pair[:index]), Decimal(0))
+                previous_value = sum((row.net_volume for row in pair[index : index * 2]), Decimal(0))
+                current = SimpleNamespace(
+                    value=current_value,
+                    source_id=pair[0].source_id,
+                    id=pair[0].id,
+                    trading_date=pair[0].trading_date,
+                )
+                previous = SimpleNamespace(
+                    value=previous_value,
+                    source_id=pair[index].source_id,
+                    id=pair[index].id,
+                    trading_date=pair[index].trading_date,
+                )
+            else:
+                current, previous = pair[0], pair[index]
             change = _make_change(
                 instrument,
-                pair[0],
-                pair[index],
+                current,
+                previous,
                 category="flow",
                 metric=pair[0].flow_type,
                 period=lookback,
@@ -415,4 +461,124 @@ def detect_flow_changes(db: Session, instrument: Instrument) -> list[Change]:
             )
             if change:
                 changes.append(change)
+    return changes
+
+
+def detect_ownership_changes(db: Session, instrument: Instrument) -> list[Change]:
+    rows = list(
+        db.scalars(
+            select(OwnershipSnapshot)
+            .where(OwnershipSnapshot.instrument_id == instrument.id)
+            .order_by(OwnershipSnapshot.snapshot_date.desc())
+        )
+    )
+    grouped: dict[tuple[int, str], list[OwnershipSnapshot]] = {}
+    for row in rows:
+        grouped.setdefault((row.source_id, row.holder_bucket), []).append(row)
+
+    changes: list[Change] = []
+    for pair in grouped.values():
+        if len(pair) < 2:
+            continue
+        current, previous = pair[:2]
+        getter = (
+            (lambda row: row.ownership_pct)
+            if current.ownership_pct is not None and previous.ownership_pct is not None
+            else (lambda row: row.share_count)
+            if current.share_count is not None and previous.share_count is not None
+            else lambda row: Decimal(row.holder_count or 0)
+        )
+        change = _make_change(
+            instrument,
+            current,
+            previous,
+            category="ownership",
+            metric=f"holder_{current.holder_bucket}",
+            period="previous",
+            source=db.get(DataSource, current.source_id),
+            snapshot_type="ownership_snapshots",
+            value_getter=getter,
+            rarity=_rarity(pair, getter),
+        )
+        if change:
+            change.metadata_ = {"holder_bucket": current.holder_bucket}
+            changes.append(change)
+    return changes
+
+
+def detect_event_changes(db: Session, instrument: Instrument) -> list[Change]:
+    rows = list(
+        db.scalars(
+            select(Event)
+            .where(Event.instrument_id == instrument.id)
+            .order_by(Event.event_date.desc(), Event.id.desc())
+        )
+    )
+    source_by_id = {source.id: source for source in db.scalars(select(DataSource))}
+    changes: list[Change] = []
+    for event in rows:
+        current = SimpleNamespace(
+            value=Decimal(1),
+            source_id=event.source_id,
+            id=event.id,
+            observed_at=datetime.combine(
+                event.event_date or datetime.now(UTC).date(), datetime.min.time(), tzinfo=UTC
+            ),
+        )
+        previous = SimpleNamespace(value=Decimal(0), source_id=event.source_id, id=0)
+        change = _make_change(
+            instrument,
+            current,
+            previous,
+            category="catalyst",
+            metric=event.event_type,
+            period=event.event_date.isoformat() if event.event_date else None,
+            source=source_by_id.get(event.source_id),
+            snapshot_type="events",
+            change_type="new",
+        )
+        if change:
+            change.metadata_ = {"event_id": event.id, "title": event.title, "source_url": event.source_url}
+            changes.append(change)
+    return changes
+
+
+def detect_news_changes(db: Session, instrument: Instrument) -> list[Change]:
+    rows = list(
+        db.scalars(
+            select(NewsItem)
+            .join(NewsInstrument, NewsInstrument.news_item_id == NewsItem.id)
+            .where(NewsInstrument.instrument_id == instrument.id)
+            .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+        )
+    )
+    changes: list[Change] = []
+    for news in rows:
+        importance = Decimal(str(news.importance_score if news.importance_score else 1))
+        current = SimpleNamespace(
+            value=importance,
+            source_id=news.source_id,
+            id=news.id,
+            observed_at=news.published_at,
+        )
+        previous = SimpleNamespace(value=Decimal(0), source_id=news.source_id, id=0)
+        change = _make_change(
+            instrument,
+            current,
+            previous,
+            category="news",
+            metric=news.category or "headline",
+            period="new",
+            source=db.get(DataSource, news.source_id),
+            snapshot_type="news_items",
+            change_type="new",
+        )
+        if change:
+            change.metadata_ = {
+                "news_id": news.id,
+                "headline": news.headline,
+                "source_url": news.source_url,
+                "is_material": news.is_material,
+            }
+            changes.append(change)
     return changes
