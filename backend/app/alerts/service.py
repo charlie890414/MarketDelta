@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,3 +38,34 @@ def evaluate_alerts(db: Session, since: datetime | None = None) -> list[AlertDel
             deliveries.append(delivery)
     db.flush()
     return deliveries
+
+
+async def dispatch_alerts(
+    deliveries: list[AlertDelivery],
+    webhook_url: str | None,
+    retries: int = 3,
+    backoff_seconds: float = 1.0,
+) -> None:
+    if not deliveries or not webhook_url:
+        return
+    payload = {
+        "event": "market_changes_alert",
+        "deliveries": [
+            {"delivery_id": delivery.id, "alert_id": delivery.alert_id, "change_id": delivery.change_id}
+            for delivery in deliveries
+        ],
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        for attempt in range(max(1, retries)):
+            try:
+                response = await client.post(webhook_url, json=payload)
+                response.raise_for_status()
+                for delivery in deliveries:
+                    delivery.status = "sent"
+                return
+            except httpx.HTTPError:
+                if attempt + 1 < max(1, retries):
+                    await asyncio.sleep(backoff_seconds * (2**attempt))
+    for delivery in deliveries:
+        delivery.status = "failed"
+import asyncio

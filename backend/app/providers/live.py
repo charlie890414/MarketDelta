@@ -1,7 +1,10 @@
+import csv
+import json
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
+from io import StringIO
 
 import httpx
 
@@ -48,6 +51,28 @@ class LiveProvider:
                             volume=_number(row.get("TradeVolume")),
                         )
                     )
+                covered = {observation.symbol for observation in results}
+                missing = [symbol for symbol in symbols if symbol.isdigit() and symbol not in covered]
+                if missing:
+                    response = await client.get(
+                        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close"
+                    )
+                    response.raise_for_status()
+                    for row in response.json():
+                        symbol = str(row.get("Code", ""))
+                        if symbol not in missing:
+                            continue
+                        close = _number(row.get("ClosingPrice"))
+                        if close is None:
+                            continue
+                        results.append(
+                            PriceObservation(
+                                symbol=symbol,
+                                trading_date=_tw_date(row.get("Date")) or datetime.now(UTC).date(),
+                                close=close,
+                                volume=_number(row.get("TradingShares")),
+                            )
+                        )
             for symbol in symbols:
                 if not symbol.isalpha() or not self.settings.alpha_vantage_api_key:
                     continue
@@ -156,11 +181,64 @@ class LiveProvider:
         return results
 
     async def events(self, symbols: Sequence[str]) -> list[EventObservation]:
-        # Event sources have provider-specific calendars; return no guessed events.
-        return []
+        if not self.settings.alpha_vantage_api_key:
+            return []
+        results: list[EventObservation] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": "EARNINGS_CALENDAR",
+                    "horizon": "3month",
+                    "apikey": self.settings.alpha_vantage_api_key,
+                },
+            )
+            response.raise_for_status()
+            for row in csv.DictReader(StringIO(response.text)):
+                symbol = str(row.get("symbol", "")).upper()
+                report_date = str(row.get("reportDate", ""))
+                if symbol not in symbols or not report_date:
+                    continue
+                try:
+                    event_date = datetime.fromisoformat(report_date).date()
+                except ValueError:
+                    continue
+                results.append(
+                    EventObservation(
+                        symbol=symbol,
+                        event_type="earnings",
+                        title=f"{row.get('name') or symbol} earnings release",
+                        event_date=event_date,
+                        source_url="https://www.alphavantage.co/",
+                    )
+                )
+        return results
 
     async def ownership(self, symbols: Sequence[str]) -> list[OwnershipObservation]:
-        return []
+        if not self.settings.tdcc_api_url:
+            return []
+        results: list[OwnershipObservation] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            response = await client.get(self.settings.tdcc_api_url)
+            response.raise_for_status()
+            for row in response.json():
+                symbol = str(row.get("symbol") or row.get("Code") or "")
+                if symbol not in symbols:
+                    continue
+                snapshot_date = _tw_date(row.get("snapshot_date") or row.get("Date"))
+                if not snapshot_date:
+                    continue
+                results.append(
+                    OwnershipObservation(
+                        symbol=symbol,
+                        snapshot_date=snapshot_date,
+                        holder_bucket=str(row.get("holder_bucket") or row.get("HolderBucket") or "unknown"),
+                        holder_count=_int(row.get("holder_count") or row.get("HolderCount")),
+                        share_count=_number(row.get("share_count") or row.get("ShareCount")),
+                        ownership_pct=_number(row.get("ownership_pct") or row.get("OwnershipPct")),
+                    )
+                )
+        return results
 
     async def news(self, symbols: Sequence[str]) -> list[NewsObservation]:
         if not self.settings.alpha_vantage_api_key:
@@ -213,6 +291,7 @@ class LiveProvider:
 
     async def fundamentals(self, symbols: Sequence[str]) -> list[FundamentalObservation]:
         results: list[FundamentalObservation] = []
+        cik_map = json.loads(self.settings.sec_cik_map)
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             response = await client.get(
                 "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",
@@ -234,6 +313,51 @@ class LiveProvider:
                             observed_at=datetime.now(UTC),
                         )
                     )
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            for symbol in symbols:
+                cik = cik_map.get(symbol.upper())
+                if not cik:
+                    continue
+                response = await client.get(
+                    f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json",
+                    headers={"User-Agent": self.settings.sec_user_agent},
+                )
+                response.raise_for_status()
+                facts = response.json().get("facts", {}).get("us-gaap", {})
+                revenue = facts.get("RevenueFromContractWithCustomerExcludingAssessedTax")
+                units = (revenue or {}).get("units", {}).get("USD", [])
+                for fact in units:
+                    if fact.get("fp") != "FY" or not fact.get("fy") or not fact.get("filed"):
+                        continue
+                    results.append(
+                        FundamentalObservation(
+                            symbol=symbol,
+                            metric="revenue_annual",
+                            period=f"FY{fact['fy']}",
+                            value=Decimal(str(fact["val"])),
+                            unit="USD",
+                            observed_at=datetime.fromisoformat(fact["filed"]).replace(tzinfo=UTC),
+                        )
+                    )
+            if self.settings.mops_api_url:
+                response = await client.get(self.settings.mops_api_url)
+                response.raise_for_status()
+                for row in response.json():
+                    symbol = str(row.get("symbol") or row.get("Code") or "")
+                    period = str(row.get("period") or row.get("Date") or "")
+                    value = _number(row.get("value") or row.get("Revenue"))
+                    if symbol not in symbols or not period or value is None:
+                        continue
+                    results.append(
+                        FundamentalObservation(
+                            symbol=symbol,
+                            metric=str(row.get("metric") or "monthly_revenue"),
+                            period=period,
+                            value=value,
+                            unit=str(row.get("unit") or "TWD"),
+                            observed_at=datetime.now(UTC),
+                        )
+                    )
         return results
 
 
@@ -251,6 +375,13 @@ def _first(row: dict, *keys: str) -> object:
         if row.get(key) not in (None, "", "-"):
             return row[key]
     return None
+
+
+def _int(value: object) -> int | None:
+    try:
+        return int(str(value).replace(",", "")) if value not in (None, "", "-") else None
+    except ValueError:
+        return None
 
 
 def _tw_date(value: object):

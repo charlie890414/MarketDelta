@@ -1,11 +1,15 @@
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from itertools import pairwise
+from statistics import pstdev
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.changes.comparator import compare
+from app.config import get_settings
 from app.db.models import (
     Change,
     DataSource,
@@ -37,22 +41,27 @@ def _make_change(
     snapshot_type: str,
     lookback: str = "previous",
     rarity: float = 50,
+    value_getter=None,
     change_type: str = "changed",
 ) -> Change | None:
-    current_value = (
-        current.value
-        if hasattr(current, "value")
-        else current.net_volume
-        if hasattr(current, "net_volume")
-        else current.close
-    )
-    previous_value = (
-        previous.value
-        if hasattr(previous, "value")
-        else previous.net_volume
-        if hasattr(previous, "net_volume")
-        else previous.close
-    )
+    if value_getter:
+        current_value = value_getter(current)
+        previous_value = value_getter(previous)
+    else:
+        current_value = (
+            current.value
+            if hasattr(current, "value")
+            else current.net_volume
+            if hasattr(current, "net_volume")
+            else current.close
+        )
+        previous_value = (
+            previous.value
+            if hasattr(previous, "value")
+            else previous.net_volume
+            if hasattr(previous, "net_volume")
+            else previous.close
+        )
     if current_value == previous_value:
         return None
     absolute, pct, direction = compare(previous_value, current_value)
@@ -166,6 +175,154 @@ def detect_price_changes(db: Session, instrument: Instrument) -> list[Change]:
         )
         if change:
             changes.append(change)
+    if rows[0].volume is not None and rows[1].volume is not None:
+        volume_change = _make_change(
+            instrument,
+            rows[0],
+            rows[1],
+            category="price",
+            metric="volume",
+            period="1d",
+            source=source,
+            snapshot_type="price_daily",
+            value_getter=lambda row: row.volume,
+            rarity=_rarity(rows, lambda row: row.volume or 0),
+        )
+        if volume_change:
+            changes.append(volume_change)
+    if len(rows) >= 21:
+        current_volatility = Decimal(str(pstdev(float(row.close) for row in rows[:5])))
+        previous_volatility = Decimal(str(pstdev(float(row.close) for row in rows[5:10])))
+        volatility_change = _make_change(
+            instrument,
+            SimpleNamespace(
+                value=current_volatility,
+                source_id=rows[0].source_id,
+                id=rows[0].id,
+                trading_date=rows[0].trading_date,
+            ),
+            SimpleNamespace(
+                value=previous_volatility,
+                source_id=rows[1].source_id,
+                id=rows[1].id,
+                trading_date=rows[1].trading_date,
+            ),
+            category="price",
+            metric="volatility",
+            period="5d",
+            source=source,
+            snapshot_type="price_daily",
+            lookback="5d",
+        )
+        if volatility_change:
+            changes.append(volatility_change)
+
+        prior_high = max(row.close for row in rows[1:21])
+        if rows[0].close >= prior_high:
+            breakout_change = _make_change(
+                instrument,
+                SimpleNamespace(
+                    value=rows[0].close,
+                    source_id=rows[0].source_id,
+                    id=rows[0].id,
+                    trading_date=rows[0].trading_date,
+                ),
+                SimpleNamespace(
+                    value=prior_high,
+                    source_id=rows[1].source_id,
+                    id=rows[1].id,
+                    trading_date=rows[1].trading_date,
+                ),
+                category="price",
+                metric="breakout",
+                period="20d",
+                source=source,
+                snapshot_type="price_daily",
+                lookback="20d",
+                change_type="breakout",
+            )
+            if breakout_change:
+                changes.append(breakout_change)
+        drawdown_change = _make_change(
+            instrument,
+            SimpleNamespace(
+                value=rows[0].close,
+                source_id=rows[0].source_id,
+                id=rows[0].id,
+                trading_date=rows[0].trading_date,
+            ),
+            SimpleNamespace(
+                value=prior_high,
+                source_id=rows[1].source_id,
+                id=rows[1].id,
+                trading_date=rows[1].trading_date,
+            ),
+            category="price",
+            metric="drawdown",
+            period="20d",
+            source=source,
+            snapshot_type="price_daily",
+            lookback="20d",
+        )
+        if drawdown_change and drawdown_change.direction == "down":
+            changes.append(drawdown_change)
+    benchmark_symbols = json.loads(get_settings().benchmark_symbols)
+    benchmark_symbol = benchmark_symbols.get(instrument.market)
+    benchmark = (
+        db.scalar(
+            select(Instrument).where(
+                Instrument.market == instrument.market,
+                Instrument.symbol == benchmark_symbol,
+            )
+        )
+        if benchmark_symbol
+        else None
+    )
+    if benchmark and benchmark.id != instrument.id:
+        benchmark_rows = list(
+            db.scalars(
+                select(PriceDaily)
+                .where(PriceDaily.instrument_id == benchmark.id)
+                .order_by(PriceDaily.trading_date.desc())
+            )
+        )
+        by_date = {row.trading_date: row for row in benchmark_rows}
+        for lookback, index in (("previous", 1), ("5d", 5), ("20d", 20)):
+            if len(rows) <= index:
+                continue
+            benchmark_current = by_date.get(rows[0].trading_date)
+            benchmark_previous = by_date.get(rows[index].trading_date)
+            if not benchmark_current or not benchmark_previous:
+                continue
+            instrument_ratio = rows[0].close / rows[index].close
+            benchmark_ratio = benchmark_current.close / benchmark_previous.close
+            current_relative = Decimal(100) * instrument_ratio
+            previous_relative = Decimal(100) * benchmark_ratio
+            relative_change = _make_change(
+                instrument,
+                SimpleNamespace(
+                    value=current_relative,
+                    source_id=rows[0].source_id,
+                    id=rows[0].id,
+                    trading_date=rows[0].trading_date,
+                ),
+                SimpleNamespace(
+                    value=previous_relative,
+                    source_id=rows[index].source_id,
+                    id=rows[index].id,
+                    trading_date=rows[index].trading_date,
+                ),
+                category="price",
+                metric="benchmark_relative_return",
+                period=lookback,
+                source=source,
+                snapshot_type="price_daily",
+                lookback=lookback,
+                rarity=50,
+            )
+            if relative_change:
+                relative_change.metadata_ = {"benchmark_symbol": benchmark.symbol}
+                changes.append(relative_change)
     return changes
 
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getChanges } from "../../lib/api";
+import { getAlertDeliveries, getChanges, getDailyReports } from "../../lib/api";
 
 type DashboardProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -24,11 +24,16 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   const category = first(params.category);
   const severity = first(params.severity);
   let changes = [] as Awaited<ReturnType<typeof getChanges>>;
-  try {
-    changes = await getChanges({ market, category, severity });
-  } catch {
-    changes = [];
-  }
+  let reports = [] as Awaited<ReturnType<typeof getDailyReports>>;
+  let deliveries = [] as Awaited<ReturnType<typeof getAlertDeliveries>>;
+  const [changeResult, reportResult, deliveryResult] = await Promise.allSettled([
+    getChanges({ market, category, severity }),
+    getDailyReports("market"),
+    getAlertDeliveries(),
+  ]);
+  if (changeResult.status === "fulfilled") changes = changeResult.value;
+  if (reportResult.status === "fulfilled") reports = reportResult.value;
+  if (deliveryResult.status === "fulfilled") deliveries = deliveryResult.value;
 
   const filters = [
     ["ALL SIGNALS", filterHref(), !market && !category],
@@ -56,6 +61,10 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
         ))}
       </nav>
       <div className="feed-meta">LAST 24 HOURS · SCORE 50+ · {changes.length} SIGNALS</div>
+      {reports[0] && <section className="history-block">
+        <div className="eyebrow">Daily report / {reports[0].report_date}</div>
+        <div className="metric">{reports[0].title}<span>Persisted deterministic digest · {deliveries.length} alert deliveries</span></div>
+      </section>}
       <section className="feed">
         {changes.length ? changes.map((change) => (
           <Link className="change" href={`/company/${change.symbol}`} key={change.id}>

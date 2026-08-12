@@ -6,6 +6,10 @@ from app.db.session import SessionLocal
 SOURCES = [
     ("twse", "TWSE", "exchange", "official"),
     ("alphavantage", "Alpha Vantage", "provider", "medium"),
+    ("alpha_news", "Alpha Vantage News", "news", "medium"),
+    ("mops", "MOPS", "government", "official"),
+    ("tdcc", "TDCC", "government", "official"),
+    ("sec", "SEC Company Facts", "government", "official"),
 ]
 INSTRUMENTS = [
     ("AMD", "US", "NASDAQ", "Advanced Micro Devices", "USD"),

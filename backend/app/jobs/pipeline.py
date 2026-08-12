@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from app.alerts.service import evaluate_alerts
+from app.alerts.service import dispatch_alerts, evaluate_alerts
 from app.changes.engine import (
     detect_estimate_changes,
     detect_flow_changes,
@@ -64,7 +64,8 @@ def _raw(db, source_id: int, provider: Provider, endpoint: str, instrument_id: i
         status="success",
         content_hash=hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest(),
         payload=payload,
-        metadata_={"normalized": True},
+        raw_text=json.dumps(payload, sort_keys=True),
+        metadata_={"normalized": True, "payload_format": "normalized_observation"},
     )
     db.add(row)
     db.flush()
@@ -83,6 +84,10 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         db.flush()
         twse = db.scalar(select(DataSource).where(DataSource.code == "twse"))
         alpha = db.scalar(select(DataSource).where(DataSource.code == "alphavantage"))
+        alpha_news = db.scalar(select(DataSource).where(DataSource.code == "alpha_news")) or alpha
+        mops = db.scalar(select(DataSource).where(DataSource.code == "mops")) or twse
+        tdcc = db.scalar(select(DataSource).where(DataSource.code == "tdcc")) or twse
+        sec = db.scalar(select(DataSource).where(DataSource.code == "sec")) or alpha
         if not twse or not alpha:
             job.status = "failed"
             job.finished_at = datetime.now(UTC)
@@ -151,17 +156,18 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             instrument = _instrument(db, observation.symbol)
             if not instrument:
                 continue
-            raw = _raw(db, twse.id, provider, "fundamentals", instrument.id, observation)
+            source = sec if observation.unit == "USD" and instrument.market == "US" else mops
+            raw = _raw(db, source.id, provider, "fundamentals", instrument.id, observation)
             exists = db.scalar(select(FundamentalSnapshot).where(
                 FundamentalSnapshot.instrument_id == instrument.id,
-                FundamentalSnapshot.source_id == twse.id,
+                FundamentalSnapshot.source_id == source.id,
                 FundamentalSnapshot.metric == observation.metric,
                 FundamentalSnapshot.period_label == observation.period,
                 FundamentalSnapshot.observed_at == observation.observed_at,
             ))
             if not exists:
                 db.add(FundamentalSnapshot(
-                    instrument_id=instrument.id, source_id=twse.id,
+                    instrument_id=instrument.id, source_id=source.id,
                     raw_ingestion_id=raw.id, metric=observation.metric,
                     period_label=observation.period, value=observation.value,
                     unit=observation.unit, observed_at=observation.observed_at,
@@ -191,6 +197,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
 
         for observation in events:
             instrument = _instrument(db, observation.symbol) if observation.symbol else None
+            source = alpha if instrument and instrument.market == "US" else twse
             exists = db.scalar(select(Event).where(
                 Event.instrument_id == instrument.id if instrument else Event.instrument_id.is_(None),
                 Event.event_type == observation.event_type,
@@ -199,7 +206,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             ))
             if not exists:
                 db.add(Event(
-                    instrument_id=instrument.id if instrument else None, source_id=twse.id,
+                    instrument_id=instrument.id if instrument else None, source_id=source.id,
                     event_type=observation.event_type, title=observation.title,
                     event_date=observation.event_date, source_url=observation.source_url,
                     status="scheduled",
@@ -210,11 +217,11 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             instrument = _instrument(db, observation.symbol)
             if not instrument:
                 continue
-            raw = _raw(db, twse.id, provider, "ownership", instrument.id, observation)
+            raw = _raw(db, tdcc.id, provider, "ownership", instrument.id, observation)
             exists = db.scalar(
                 select(OwnershipSnapshot).where(
                     OwnershipSnapshot.instrument_id == instrument.id,
-                    OwnershipSnapshot.source_id == twse.id,
+                    OwnershipSnapshot.source_id == tdcc.id,
                     OwnershipSnapshot.snapshot_date == observation.snapshot_date,
                     OwnershipSnapshot.holder_bucket == observation.holder_bucket,
                 )
@@ -223,7 +230,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                 db.add(
                     OwnershipSnapshot(
                         instrument_id=instrument.id,
-                        source_id=twse.id,
+                        source_id=tdcc.id,
                         raw_ingestion_id=raw.id,
                         snapshot_date=observation.snapshot_date,
                         holder_bucket=observation.holder_bucket,
@@ -238,15 +245,15 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             instrument = _instrument(db, observation.symbol) if observation.symbol else None
             duplicate = db.scalar(
                 select(NewsItem).where(
-                    NewsItem.source_id == twse.id,
+                    NewsItem.source_id == alpha_news.id,
                     NewsItem.external_id == observation.external_id,
                 )
             ) if observation.external_id else None
             if duplicate:
                 continue
-            raw = _raw(db, twse.id, provider, "news", instrument.id if instrument else None, observation)
+            raw = _raw(db, alpha_news.id, provider, "news", instrument.id if instrument else None, observation)
             item = NewsItem(
-                source_id=twse.id,
+                source_id=alpha_news.id,
                 raw_ingestion_id=raw.id,
                 external_id=observation.external_id,
                 headline=observation.headline,
@@ -289,7 +296,14 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
 
         db.flush()
         generate_daily_reports(db)
-        evaluate_alerts(db)
+        deliveries = evaluate_alerts(db)
+        settings = get_settings()
+        await dispatch_alerts(
+            deliveries,
+            settings.alert_webhook_url,
+            settings.alert_webhook_retries,
+            settings.alert_webhook_backoff_seconds,
+        )
         job.finished_at = datetime.now(UTC)
         job.status = "partial" if errors else "success"
         job.items_requested = len(symbols)

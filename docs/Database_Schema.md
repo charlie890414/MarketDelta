@@ -1939,7 +1939,8 @@ market
 ```
 
 
-This table is optional for initial implementation.
+This table is persisted by the daily report generator and is exposed through
+`GET /reports/daily`.
 
 
 ---
@@ -2618,7 +2619,26 @@ A market-native date is stored as a date, not inferred later from a UTC timestam
 ---
 
 
-# 24. Future Extensions
+# 24. Implemented Extensions
+
+The current schema also includes the following persisted domain tables:
+
+```text
+daily_reports
+ownership_snapshots
+news_items
+news_instruments
+ai_interpretations
+ai_interpretation_changes
+alerts
+alert_deliveries
+```
+
+These tables retain source lineage and structured interpretation metadata without
+changing deterministic objective fields.
+
+
+# 25. Future Extensions
 
 
 Possible later additions:
@@ -2642,10 +2662,6 @@ thesis_records
 
 thesis_events
 
-alerts
-
-alert_deliveries
-
 ```
 
 
@@ -2653,4 +2669,3 @@ These are intentionally excluded from the MVP schema so the initial engine remai
 
 
 > market state → change detection → significance → interpretation
-

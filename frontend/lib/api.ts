@@ -86,6 +86,14 @@ export async function getDailyReports(reportType?: string) {
   return data;
 }
 
+export async function getAlertDeliveries() {
+  const { data, error } = await client.GET("/alerts/deliveries", {
+    params: { query: { limit: 50 } },
+  });
+  if (error || !data) throw new Error("Alert deliveries unavailable");
+  return data;
+}
+
 export async function createWatchlist(name: string, description?: string) {
   const { data, error } = await client.POST("/watchlists", {
     body: { name, description },
