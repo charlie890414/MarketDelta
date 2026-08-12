@@ -2,6 +2,32 @@
 
 Deterministic market-state diff engine for Taiwan and US equities.
 
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) explains the system boundary, data flow,
+  and design principles.
+- [Product requirements](docs/PRD.md) records the product scope and MVP goals.
+- [Database schema](docs/Database_Schema.md) describes the relational model and
+  its historical design rationale.
+
+The documents in `docs/` include both implemented behavior and forward-looking
+design material. For the exact API contract, use the running service's
+interactive specification at `/docs`; for the exact database shape, use the
+Alembic migrations in `backend/alembic/versions/`.
+
+## Current implementation
+
+The application runs as a modular monolith with four Docker Compose services:
+PostgreSQL, the FastAPI backend, the scheduler, and the Next.js frontend. The
+pipeline supports fixtures for deterministic development and optional live
+collection for prices, Taiwan market data, SEC filings, and Google News.
+
+Collected data is retained with source lineage, normalized into historical
+snapshots, compared against prior observations, and scored deterministically.
+AI-powered news classification, company interpretations, and daily briefs are
+optional enhancements; each has a persisted deterministic fallback and never
+changes the underlying market-change calculations.
+
 ## Run locally
 
 ```bash
