@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Change, DailyReport, Event, Instrument, WatchlistItem
+from app.db.models import Change, DailyReport, Event, Instrument, Watchlist, WatchlistItem
 
 
 def _number(value: Decimal | float | None) -> float | None:
@@ -69,9 +69,17 @@ def generate_daily_reports(db: Session, report_date: date | None = None) -> list
     all_rows = _changes(db, start)
     all_changes = [_change_payload(change, instrument) for change, instrument in all_rows]
 
-    watchlist_ids = set(
-        db.scalars(select(WatchlistItem.instrument_id).distinct())
+    portfolio_ids = set(
+        db.scalars(
+            select(WatchlistItem.instrument_id)
+            .join(Watchlist, Watchlist.id == WatchlistItem.watchlist_id)
+            .where(Watchlist.name == "Portfolio")
+            .distinct()
+        )
     )
+    watchlist_ids = set(db.scalars(select(WatchlistItem.instrument_id).distinct()))
+    portfolio_rows = _changes(db, start, instrument_ids=portfolio_ids)
+    portfolio_changes = [_change_payload(change, instrument) for change, instrument in portfolio_rows]
     watchlist_rows = _changes(db, start, instrument_ids=watchlist_ids)
     watchlist_changes = [_change_payload(change, instrument) for change, instrument in watchlist_rows]
 
@@ -115,7 +123,7 @@ def generate_daily_reports(db: Session, report_date: date | None = None) -> list
             report_date,
             "portfolio",
             "Portfolio Changes Daily",
-            {"important_changes": [], "count": 0},
+            {"important_changes": portfolio_changes, "count": len(portfolio_changes)},
         ),
         _upsert_report(
             db,

@@ -2172,7 +2172,7 @@ GET /changes
 
 
 
-GET /changes/{symbol}
+GET /changes/{change_id}
 
 
 
@@ -2188,7 +2188,7 @@ GET /companies/{symbol}/events
 
 
 
-GET /daily-report
+GET /reports/daily
 
 
 
@@ -2200,7 +2200,7 @@ POST /watchlists
 
 
 
-POST /watchlists/{id}/stocks
+POST /watchlists/{watchlist_id}/items
 
 ```
 
@@ -2216,7 +2216,7 @@ POST /watchlists/{id}/stocks
 
 ```http
 
-GET /changes?period=24h&min_score=70
+GET /changes?hours=24&min_score=70
 
 ```
 

@@ -28,8 +28,18 @@ def score_change(
     freshness: float = 100,
     source_quality: float = 80,
 ) -> dict[str, float | str]:
-    magnitude = min(abs(candidate.percentage_change or 0) * 8, 100)
-    relevance = {"expectation": 95, "fundamental": 90, "flow": 75, "price": 55}.get(
+    if candidate.change_type == "new":
+        magnitude = {"event": 65, "news": 60}.get(candidate.category, 50)
+    else:
+        magnitude = min(abs(candidate.percentage_change or 0) * 8, 100)
+    relevance = {
+        "expectation": 95,
+        "fundamental": 90,
+        "event": 80,
+        "news": 70,
+        "flow": 75,
+        "price": 55,
+    }.get(
         candidate.category, 50
     )
     total = sum(

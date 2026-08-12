@@ -391,9 +391,9 @@ def detect_fundamental_changes(db: Session, instrument: Instrument) -> list[Chan
             .order_by(FundamentalSnapshot.observed_at.desc())
         )
     )
-    grouped: dict[tuple[int, str], list[FundamentalSnapshot]] = {}
+    grouped: dict[tuple[int, str, str], list[FundamentalSnapshot]] = {}
     for row in rows:
-        grouped.setdefault((row.source_id, row.metric), []).append(row)
+        grouped.setdefault((row.source_id, row.metric, row.period_label), []).append(row)
     changes = []
     for pair in grouped.values():
         if len(pair) < 2:
@@ -530,7 +530,7 @@ def detect_event_changes(db: Session, instrument: Instrument) -> list[Change]:
             instrument,
             current,
             previous,
-            category="catalyst",
+            category="event",
             metric=event.event_type,
             period=event.event_date.isoformat() if event.event_date else None,
             source=source_by_id.get(event.source_id),

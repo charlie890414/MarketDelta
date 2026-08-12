@@ -208,8 +208,10 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                 Event.event_date == observation.event_date,
             ))
             if not exists:
+                raw = _raw(db, source.id, provider, "events", instrument.id if instrument else None, observation)
                 db.add(Event(
                     instrument_id=instrument.id if instrument else None, source_id=source.id,
+                    raw_ingestion_id=raw.id,
                     event_type=observation.event_type, title=observation.title,
                     event_date=observation.event_date, source_url=observation.source_url,
                     status="scheduled",

@@ -1514,7 +1514,7 @@ Example:
 
 ```http
 
-GET /changes?period=24h&min_score=70&market=US
+GET /changes?hours=24&min_score=70&market=US
 
 ```
 

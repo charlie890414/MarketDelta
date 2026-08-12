@@ -44,6 +44,26 @@ def test_score_is_bounded_and_severity_is_deterministic():
     assert severity(result["total"]) in {"noise", "minor", "notable", "important", "critical"}
 
 
+@pytest.mark.parametrize("category", ["event", "news"])
+def test_new_event_and_news_changes_are_feed_visible(category):
+    candidate = ChangeCandidate(
+        symbol="AMD",
+        market="US",
+        category=category,
+        metric="headline",
+        period="new",
+        previous=Decimal(0),
+        current=Decimal(1),
+        absolute_change=Decimal(1),
+        percentage_change=None,
+        direction="up",
+        change_type="new",
+        baseline_type="previous",
+    )
+    result = score_change(candidate, source_quality=100)
+    assert result["total"] >= 50
+
+
 def test_live_provider_number_parser_handles_market_placeholders():
     assert _number("1,234") == Decimal(1234)
     assert _number("-") is None

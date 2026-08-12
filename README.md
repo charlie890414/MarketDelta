@@ -6,11 +6,25 @@ Deterministic market-state diff engine for Taiwan and US equities.
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose -f compose.dev.yml up --build
 ```
 
 Backend: `http://localhost:8000/docs`  
 Dashboard: `http://localhost:3001` (host port 3000 is used by another local service)
+
+## Run in production
+
+Copy `.env.example` to `.env`, set a strong `POSTGRES_PASSWORD`, update
+`DATABASE_URL` with the same password, and set the public
+`NEXT_PUBLIC_API_URL`, then start the production stack:
+
+```bash
+docker compose up -d --build
+```
+
+The production compose file does not mount source directories or expose
+PostgreSQL to the host. Backend migrations run before the API starts, and the
+frontend is built with `next build` before serving with `next start`.
 
 For local Python development:
 
