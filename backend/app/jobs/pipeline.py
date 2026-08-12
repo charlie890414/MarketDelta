@@ -84,6 +84,27 @@ def _instrument(db, symbol: str) -> Instrument | None:
     return db.scalar(select(Instrument).where(Instrument.symbol == symbol))
 
 
+def _persist_new_changes(db, candidates: list[Change]) -> int:
+    """Store detector output once, keyed by the snapshots it compares."""
+    inserted = 0
+    for change in candidates:
+        duplicate = db.scalar(
+            select(Change).where(
+                Change.instrument_id == change.instrument_id,
+                Change.category == change.category,
+                Change.metric == change.metric,
+                Change.period == change.period,
+                Change.current_snapshot_type == change.current_snapshot_type,
+                Change.current_snapshot_id == change.current_snapshot_id,
+                Change.previous_snapshot_id == change.previous_snapshot_id,
+            )
+        )
+        if not duplicate:
+            db.add(change)
+            inserted += 1
+    return inserted
+
+
 def _raw(db, source_id: int, provider: Provider, endpoint: str, instrument_id: int, observation):
     payload = observation.model_dump(mode="json")
     row = RawIngestion(
@@ -216,10 +237,13 @@ async def run_price_history_backfill(symbol: str) -> dict[str, int | str]:
                     )
                     inserted += 1
 
+        db.flush()
+        changes_inserted = _persist_new_changes(db, detect_price_changes(db, instrument))
         job.finished_at = datetime.now(UTC)
         job.status = "partial" if errors else "success"
         job.items_fetched = len(prices)
         job.items_inserted = inserted
+        job.items_changed = changes_inserted
         job.items_failed = len(errors)
         job.error_summary = "; ".join(errors) if errors else None
         db.commit()
@@ -227,6 +251,7 @@ async def run_price_history_backfill(symbol: str) -> dict[str, int | str]:
             "status": job.status,
             "prices": len(prices),
             "snapshots_inserted": inserted,
+            "changes_detected": changes_inserted,
             "failed_domains": len(errors),
         }
 
@@ -605,22 +630,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             candidates.extend(detect_ownership_changes(db, instrument))
             candidates.extend(detect_event_changes(db, instrument))
             candidates.extend(detect_news_changes(db, instrument))
-        changes_inserted = 0
-        for change in candidates:
-            duplicate = db.scalar(
-                select(Change).where(
-                    Change.instrument_id == change.instrument_id,
-                    Change.category == change.category,
-                    Change.metric == change.metric,
-                    Change.period == change.period,
-                    Change.current_snapshot_type == change.current_snapshot_type,
-                    Change.current_snapshot_id == change.current_snapshot_id,
-                    Change.previous_snapshot_id == change.previous_snapshot_id,
-                )
-            )
-            if not duplicate:
-                db.add(change)
-                changes_inserted += 1
+        changes_inserted = _persist_new_changes(db, candidates)
 
         db.flush()
         _refresh_news_scores(db)

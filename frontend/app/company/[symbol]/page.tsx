@@ -21,8 +21,11 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
       <Link className="eyebrow" href="/dashboard">← 返回訊號列表</Link>
       <h1>{company.symbol}<br /><span>{company.company_name}.</span></h1>
       <p className="lede">{company.market} / {company.exchange ?? "市場"} / {company.currency}。客觀變化與解讀內容分開呈現。</p>
-      <div className="toolbar"><span className="pill selected">{changes.length} 項變化</span><span className="pill">{history.length} 筆觀測</span></div>
-      <section className="feed">
+      <nav className="toolbar" aria-label="公司頁面區段導覽">
+        <a className="pill selected" href="#changes">{changes.length} 項變化</a>
+        <a className="pill" href="#history">{history.length} 筆觀測</a>
+      </nav>
+      <section className="feed" id="changes">
         {changes.length ? changes.map((change) => <div className="change" key={change.id}>
           <i className={`rail ${change.direction === "down" ? "down" : ""}`} />
           <div className="ticker">{changeTitle(change)}</div>
@@ -35,7 +38,7 @@ export default async function Company({ params }: { params: Promise<{ symbol: st
           <div className="score"><strong>{Math.round(change.total_score)}</strong>分</div>
         </div>) : <div className="empty">這間公司尚無變化紀錄。</div>}
       </section>
-      <section className="history-block">
+      <section className="history-block" id="history">
         <div className="eyebrow">快照歷史</div>
         <div className="history-list">
           {history.slice(-24).reverse().map((point, index) => <div className="history-row" key={`${point.metric}-${point.observed_at}-${index}`}>
