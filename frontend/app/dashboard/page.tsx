@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getAlertDeliveries, getChanges, getDailyReports, getWatchlists, type Change } from "../../lib/api";
+import { getChanges, getDailyReports, getWatchlists, type Change } from "../../lib/api";
 import { changeDescription, changeDetails } from "../../lib/change-copy";
 
 export const dynamic = "force-dynamic";
@@ -36,16 +36,13 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
   const watchlistId = first(params.watchlist_id);
   let changes = [] as Awaited<ReturnType<typeof getChanges>>;
   let reports = [] as Awaited<ReturnType<typeof getDailyReports>>;
-  let deliveries = [] as Awaited<ReturnType<typeof getAlertDeliveries>>;
-  const [changeResult, reportResult, deliveryResult, watchlistResult] = await Promise.allSettled([
+  const [changeResult, reportResult, watchlistResult] = await Promise.allSettled([
     getChanges({ market, category, severity, watchlistId: watchlistId ? Number(watchlistId) : undefined }),
     getDailyReports("market"),
-    getAlertDeliveries(),
     getWatchlists(),
   ]);
   if (changeResult.status === "fulfilled") changes = changeResult.value;
   if (reportResult.status === "fulfilled") reports = reportResult.value;
-  if (deliveryResult.status === "fulfilled") deliveries = deliveryResult.value;
   const watchlists = watchlistResult.status === "fulfilled" ? watchlistResult.value : [];
 
   const filters = [
@@ -92,7 +89,7 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
       <div className="feed-meta">最近 24 小時 · 分數 50+ · {changes.length} 個訊號</div>
       {reports[0] && <section className="history-block">
         <div className="eyebrow">每日報告 / {reports[0].report_date}</div>
-        <div className="metric">{reports[0].title}<span>已儲存的客觀摘要 · {deliveries.length} 筆通知紀錄</span></div>
+        <div className="metric">{reports[0].title}<span>已儲存的客觀摘要</span></div>
       </section>}
       {!isFiltered && highlights.length > 0 && <section className="signal-section">
         <div className="section-heading"><div><div className="eyebrow">今日重點</div><h2>系統替你挑出的 {highlights.length} 件事</h2></div><a className="pill" href="#all-signals">查看全部 {changes.length} 個訊號</a></div>

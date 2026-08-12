@@ -115,14 +115,6 @@ export async function getDailyReports(reportType?: string) {
   return data;
 }
 
-export async function getAlertDeliveries() {
-  const { data, error } = await client.GET("/alerts/deliveries", {
-    params: { query: { limit: 50 } },
-  });
-  if (error || !data) throw new Error("Alert deliveries unavailable");
-  return data;
-}
-
 export async function getAlerts() {
   const { data, error } = await client.GET("/alerts");
   if (error || !data) throw new Error("Alerts unavailable");
