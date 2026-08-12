@@ -1,7 +1,9 @@
 import createClient from "openapi-fetch";
 import type { paths } from "./generated/api";
 
-const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const base = typeof window === "undefined"
+  ? process.env.API_INTERNAL_URL ?? "http://localhost:8000"
+  : process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const client = createClient<paths>({ baseUrl: base });
 export type Change = paths["/changes"]["get"]["responses"][200]["content"]["application/json"][number];
 

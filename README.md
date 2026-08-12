@@ -15,8 +15,7 @@ Dashboard: `http://localhost:3001` (host port 3000 is used by another local serv
 ## Run in production
 
 Copy `.env.example` to `.env`, set a strong `POSTGRES_PASSWORD`, update
-`DATABASE_URL` with the same password, and set the public
-`NEXT_PUBLIC_API_URL`, then start the production stack:
+`DATABASE_URL` with the same password, then start the production stack:
 
 ```bash
 docker compose up -d --build
@@ -25,6 +24,9 @@ docker compose up -d --build
 The production compose file does not mount source directories or expose
 PostgreSQL to the host. Backend migrations run before the API starts, and the
 frontend is built with `next build` before serving with `next start`.
+The frontend proxies same-origin `/api` requests to the internal backend
+service, so `API_INTERNAL_URL` should remain `http://backend:8000` in Docker.
+For direct local frontend development, set it to `http://localhost:8000`.
 
 For local Python development:
 

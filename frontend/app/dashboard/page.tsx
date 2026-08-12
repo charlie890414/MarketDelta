@@ -40,6 +40,7 @@ export default async function Dashboard({ searchParams }: DashboardProps) {
     getChanges({ market, category, severity, watchlistId: watchlistId ? Number(watchlistId) : undefined }),
     getDailyReports("market"),
     getAlertDeliveries(),
+    getWatchlists(),
   ]);
   if (changeResult.status === "fulfilled") changes = changeResult.value;
   if (reportResult.status === "fulfilled") reports = reportResult.value;

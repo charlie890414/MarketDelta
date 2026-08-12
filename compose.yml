@@ -66,7 +66,8 @@ services:
     command: sh -c "npm run build && npm run start"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL must be set in .env}
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:8000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
     ports:
       - "${FRONTEND_PORT:-3001}:3000"
     depends_on:
