@@ -1,8 +1,8 @@
 """Replace the Stooq data source with Yahoo Finance."""
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "0009_replace_stooq_with_yfinance"
 down_revision = "0008_read_path_indexes"

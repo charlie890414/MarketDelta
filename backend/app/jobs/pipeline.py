@@ -1,7 +1,9 @@
 import hashlib
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 
 from sqlalchemy import delete, func, select
 
@@ -28,6 +30,7 @@ from app.db.models import (
     Instrument,
     InstrumentAlias,
     JobRun,
+    MacroSnapshot,
     NewsInstrument,
     NewsItem,
     OwnershipSnapshot,
@@ -103,6 +106,29 @@ def _persist_new_changes(db, candidates: list[Change]) -> int:
             db.add(change)
             inserted += 1
     return inserted
+
+
+def _normalized_headline(headline: str) -> str:
+    """Provider-neutral key for syndicated headlines."""
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", headline.lower())
+
+
+def _is_duplicate_news(db, observation, instrument: Instrument | None) -> bool:
+    """Reject URL duplicates and near-identical syndicated headlines."""
+    by_url = db.scalar(select(NewsItem).where(NewsItem.source_url == observation.source_url))
+    if by_url:
+        return True
+    lower = observation.published_at - timedelta(hours=12)
+    upper = observation.published_at + timedelta(hours=12)
+    query = select(NewsItem).where(NewsItem.published_at.between(lower, upper))
+    if instrument:
+        query = query.join(NewsInstrument).where(NewsInstrument.instrument_id == instrument.id)
+    normalized = _normalized_headline(observation.headline)
+    for existing in db.scalars(query):
+        candidate = _normalized_headline(existing.headline)
+        if normalized == candidate or SequenceMatcher(None, normalized, candidate).ratio() >= 0.9:
+            return True
+    return False
 
 
 def _raw(db, source_id: int, provider: Provider, endpoint: str, instrument_id: int, observation):
@@ -280,6 +306,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         tdcc = db.scalar(select(DataSource).where(DataSource.code == "tdcc")) or twse
         sec = db.scalar(select(DataSource).where(DataSource.code == "sec")) or alpha
         sec_filings = db.scalar(select(DataSource).where(DataSource.code == "sec_filings")) or sec
+        fred = db.scalar(select(DataSource).where(DataSource.code == "fred"))
         if not twse or not alpha:
             job.status = "failed"
             job.finished_at = datetime.now(UTC)
@@ -380,6 +407,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         fundamentals = await _fetch_domain(
             "fundamentals", lambda: provider.fundamentals(symbols), errors
         )
+        macro = await _fetch_domain("macro", provider.macro, errors)
         inserted = 0
 
         for observation in prices:
@@ -464,6 +492,31 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                         raw_ingestion_id=raw.id,
                         metric=observation.metric,
                         period_label=observation.period,
+                        value=observation.value,
+                        unit=observation.unit,
+                        observed_at=observation.observed_at,
+                    )
+                )
+                inserted += 1
+
+        if fred is None and macro:
+            errors.append("macro: missing data source fred")
+        elif fred:
+            for observation in macro:
+                exists = db.scalar(
+                    select(MacroSnapshot).where(
+                        MacroSnapshot.source_id == fred.id,
+                        MacroSnapshot.series_id == observation.series_id,
+                        MacroSnapshot.observation_date == observation.observation_date,
+                    )
+                )
+                if exists:
+                    continue
+                db.add(
+                    MacroSnapshot(
+                        source_id=fred.id,
+                        series_id=observation.series_id,
+                        observation_date=observation.observation_date,
                         value=observation.value,
                         unit=observation.unit,
                         observed_at=observation.observed_at,
@@ -586,7 +639,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
                 if observation.external_id
                 else None
             )
-            if duplicate:
+            if duplicate or _is_duplicate_news(db, observation, instrument):
                 continue
             raw = _raw(
                 db,
@@ -661,6 +714,7 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
             "ownership": len(ownership),
             "news": len(news),
             "fundamentals": len(fundamentals),
+            "macro": len(macro),
             "snapshots_inserted": inserted,
             "changes_detected": changes_inserted,
             "failed_domains": len(errors),

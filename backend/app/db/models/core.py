@@ -191,6 +191,45 @@ class FundamentalSnapshot(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class MacroSnapshot(Base):
+    __tablename__ = "macro_snapshots"
+    __table_args__ = (UniqueConstraint("source_id", "series_id", "observation_date"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    series_id: Mapped[str] = mapped_column(String(64), index=True)
+    observation_date: Mapped[date] = mapped_column(Date)
+    value: Mapped[Decimal] = mapped_column(Numeric(30, 8))
+    unit: Mapped[str] = mapped_column(String(32))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CorporateAction(Base):
+    __tablename__ = "corporate_actions"
+    __table_args__ = (UniqueConstraint("instrument_id", "source_id", "action_type", "ex_date", "external_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("data_sources.id"))
+    action_type: Mapped[str] = mapped_column(String(32))
+    ex_date: Mapped[date | None] = mapped_column(Date)
+    pay_date: Mapped[date | None] = mapped_column(Date)
+    cash_amount: Mapped[Decimal | None] = mapped_column(Numeric(30, 8))
+    ratio: Mapped[Decimal | None] = mapped_column(Numeric(30, 8))
+    external_id: Mapped[str | None] = mapped_column(String(255))
+    source_url: Mapped[str | None] = mapped_column(Text)
+
+
+class TradingSession(Base):
+    __tablename__ = "trading_sessions"
+    __table_args__ = (UniqueConstraint("market", "session_date"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(16), index=True)
+    session_date: Mapped[date] = mapped_column(Date)
+    is_trading_day: Mapped[bool] = mapped_column(Boolean)
+    open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("data_sources.id"))
+
+
 class Event(Base):
     __tablename__ = "events"
     __table_args__ = (

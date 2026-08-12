@@ -8,6 +8,7 @@ from app.domain.observations import (
     EventObservation,
     FlowObservation,
     FundamentalObservation,
+    MacroObservation,
     NewsObservation,
     OwnershipObservation,
     PriceObservation,
@@ -85,6 +86,9 @@ class FixtureProvider:
             for row in data
             if row["symbol"] in symbols
         ]
+
+    async def macro(self) -> list[MacroObservation]:
+        return []
 
     async def news(self, symbols: list[str], search_terms=None) -> list[NewsObservation]:
         data = json.loads((FIXTURES / "news.json").read_text())

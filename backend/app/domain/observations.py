@@ -75,6 +75,26 @@ class NewsObservation(BaseModel):
     summary: str | None = None
 
 
+class MacroObservation(BaseModel):
+    """One dated observation from a macroeconomic time series."""
+
+    model_config = ConfigDict(frozen=True)
+    series_id: str
+    observation_date: date
+    value: Decimal
+    unit: str = "value"
+    observed_at: datetime
+
+
+class ConstituentObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    fund_symbol: str
+    symbol: str
+    as_of_date: date
+    weight: Decimal | None = None
+    source_url: str
+
+
 class ChangeCandidate(BaseModel):
     symbol: str
     market: str

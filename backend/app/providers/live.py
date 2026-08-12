@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import yfinance as yf
+from bs4 import BeautifulSoup
 
 from app.config import get_settings
 from app.domain.observations import (
@@ -19,6 +20,7 @@ from app.domain.observations import (
     EventObservation,
     FlowObservation,
     FundamentalObservation,
+    MacroObservation,
     NewsObservation,
     OwnershipObservation,
     PriceObservation,
@@ -26,6 +28,13 @@ from app.domain.observations import (
 
 US_MARKET_TIMEZONE = ZoneInfo("America/New_York")
 US_DAILY_CLOSE_AVAILABLE_AT = time(17)
+TDCC_SHAREHOLDING_URL = "https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5"
+TPEX_INSTITUTIONAL_FLOW_URL = (
+    "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_3insti_daily_trade"
+)
+MOPS_MAJOR_INFORMATION_URL = "https://mops.twse.com.tw/mops/web/ajax_t05st01"
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 
 def _latest_closed_us_trading_date(now: datetime | None = None) -> date:
@@ -276,6 +285,12 @@ class LiveProvider:
                                 net_volume=value,
                             )
                         )
+            # TPEx publishes the same three-institution data through its
+            # official OpenAPI.  It is a separate market and must not be
+            # silently treated as TWSE flow data.
+            tpex_response = await client.get(TPEX_INSTITUTIONAL_FLOW_URL)
+            tpex_response.raise_for_status()
+            results.extend(_parse_tpex_flow_rows(tpex_response.json(), symbols))
         return results
 
     async def events(self, symbols: Sequence[str]) -> list[EventObservation]:
@@ -310,7 +325,7 @@ class LiveProvider:
                             source_code="alphavantage",
                         )
                     )
-            cik_map = json.loads(self.settings.sec_cik_map)
+            cik_map = await self._sec_cik_map(client, symbols)
             for symbol in symbols:
                 cik = cik_map.get(symbol.upper())
                 if not cik:
@@ -321,17 +336,44 @@ class LiveProvider:
                 )
                 response.raise_for_status()
                 results.extend(_sec_filing_events(symbol.upper(), response.json()))
+            results.extend(await self._mops_events(client, symbols))
         return results
 
     async def ownership(self, symbols: Sequence[str]) -> list[OwnershipObservation]:
-        if not self.settings.tdcc_api_url:
-            return []
-        results: list[OwnershipObservation] = []
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            response = await client.get(self.settings.tdcc_api_url)
+            response = await client.get(TDCC_SHAREHOLDING_URL)
             response.raise_for_status()
-            results.extend(_parse_tdcc_rows(response.json(), symbols))
+            return _parse_tdcc_csv(response.content.decode("utf-8-sig"), symbols)
+
+    async def macro(self) -> list[MacroObservation]:
+        """Fetch configured FRED series directly from the official API."""
+        if not self.settings.fred_api_key:
+            return []
+        try:
+            series_ids = json.loads(self.settings.fred_series)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(series_ids, list):
+            return []
+        results: list[MacroObservation] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            for series_id in series_ids:
+                if not isinstance(series_id, str) or not series_id:
+                    continue
+                response = await client.get(
+                    FRED_OBSERVATIONS_URL,
+                    params={
+                        "series_id": series_id,
+                        "api_key": self.settings.fred_api_key,
+                        "file_type": "json",
+                        "sort_order": "desc",
+                        "limit": 2,
+                    },
+                )
+                response.raise_for_status()
+                results.extend(_parse_fred_observations(series_id, response.json()))
         return results
+
 
     async def news(
         self, symbols: Sequence[str], search_terms: Mapping[str, Sequence[str]] | None = None
@@ -365,6 +407,7 @@ class LiveProvider:
                         if published_at < oldest_allowed:
                             continue
                         seen_urls.add(url)
+                        category, importance, material = _classify_news(headline)
                         results.append(
                             NewsObservation(
                                 symbol=symbol,
@@ -373,14 +416,17 @@ class LiveProvider:
                                 published_at=published_at,
                                 source_name=source.text if source is not None else "Google News",
                                 source_url=url,
+                                category=category,
+                                importance_score=importance,
+                                is_material=material,
                             )
                         )
         return results
 
     async def fundamentals(self, symbols: Sequence[str]) -> list[FundamentalObservation]:
         results: list[FundamentalObservation] = []
-        cik_map = json.loads(self.settings.sec_cik_map)
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            cik_map = await self._sec_cik_map(client, symbols)
             response = await client.get(
                 "https://openapi.twse.com.tw/v1/opendata/t187ap05_L",
                 headers={"User-Agent": "market-changes-engine/0.1"},
@@ -445,10 +491,66 @@ class LiveProvider:
                                 ),
                             )
                         )
-            if self.settings.mops_api_url:
-                response = await client.get(self.settings.mops_api_url)
-                response.raise_for_status()
-                results.extend(_parse_mops_rows(response.json(), symbols, datetime.now(UTC)))
+        return results
+
+    async def _sec_cik_map(
+        self, client: httpx.AsyncClient, symbols: Sequence[str]
+    ) -> dict[str, str]:
+        """Merge optional overrides with SEC's official ticker directory.
+
+        The SEC feed remains the source of truth, while an override lets a user
+        pin an unusual ticker during a symbol migration or corporate action.
+        """
+        try:
+            configured = json.loads(getattr(self.settings, "sec_cik_map", "{}"))
+        except json.JSONDecodeError:
+            configured = {}
+        mapping = {
+            str(ticker).upper(): str(cik)
+            for ticker, cik in configured.items()
+            if ticker and cik
+        }
+        missing = {symbol.upper() for symbol in symbols if symbol.isalpha()} - set(mapping)
+        if not missing:
+            return mapping
+        response = await client.get(
+            SEC_TICKERS_URL,
+            headers={"User-Agent": getattr(self.settings, "sec_user_agent", "market-changes-engine/0.1")},
+        )
+        response.raise_for_status()
+        for row in response.json().values():
+            ticker = str(row.get("ticker", "")).upper()
+            if ticker in missing and row.get("cik_str") is not None:
+                mapping[ticker] = str(row["cik_str"])
+        return mapping
+
+    async def _mops_events(
+        self, client: httpx.AsyncClient, symbols: Sequence[str]
+    ) -> list[EventObservation]:
+        """Read recent MOPS material announcements from the official endpoint.
+
+        MOPS serves this report as an HTML table rather than a stable JSON API.
+        The parser keeps the raw announcement title and derives event types only
+        for calendar-relevant announcements, preserving the official URL.
+        """
+        today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Taipei")).date()
+        results: list[EventObservation] = []
+        for symbol in symbols:
+            if not symbol.isdigit():
+                continue
+            response = await client.get(
+                MOPS_MAJOR_INFORMATION_URL,
+                params={
+                    "TYPEK": "all",
+                    "co_id": symbol,
+                    "year": str(today.year - 1911),
+                    "month": f"{today.month:02d}",
+                    "b_date": (today - timedelta(days=31)).strftime("%Y%m%d"),
+                    "e_date": today.strftime("%Y%m%d"),
+                },
+            )
+            response.raise_for_status()
+            results.extend(_parse_mops_major_information(symbol, response.text, today))
         return results
 
 
@@ -502,6 +604,125 @@ def _parse_mops_rows(
     return results
 
 
+def _parse_tdcc_csv(content: str, symbols: Sequence[str]) -> list[OwnershipObservation]:
+    """Normalize TDCC's official weekly shareholding-distribution CSV."""
+    return _parse_tdcc_rows(list(csv.DictReader(StringIO(content.lstrip("\ufeff")))), symbols)
+
+
+def _parse_tpex_flow_rows(rows: list[dict], symbols: Sequence[str]) -> list[FlowObservation]:
+    """Normalize TPEx OpenAPI three-institution net trading rows."""
+    results: list[FlowObservation] = []
+    for row in rows:
+        symbol = str(_first(row, "Code", "SecuritiesCompanyCode", "證券代號") or "")
+        if symbol not in symbols:
+            continue
+        trading_date = _tw_date(_first(row, "Date", "資料日期", "交易日期"))
+        if not trading_date:
+            continue
+        fields = {
+            "foreign_investor": ("ForeignInvestmentNet", "外資及陸資買賣超股數"),
+            "investment_trust": ("InvestmentTrustNet", "投信買賣超股數"),
+            "dealer": ("DealerNet", "自營商買賣超股數"),
+        }
+        for flow_type, keys in fields.items():
+            value = _number(_first(row, *keys))
+            if value is not None:
+                results.append(
+                    FlowObservation(
+                        symbol=symbol,
+                        trading_date=trading_date,
+                        flow_type=flow_type,
+                        net_volume=value,
+                    )
+                )
+    return results
+
+
+def _parse_fred_observations(series_id: str, payload: dict) -> list[MacroObservation]:
+    """Discard FRED missing values and retain the provider's real-time stamp."""
+    rows: list[MacroObservation] = []
+    for observation in payload.get("observations", []):
+        value = _number(observation.get("value"))
+        try:
+            observation_date = date.fromisoformat(str(observation["date"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if value is None:
+            continue
+        realtime_end = observation.get("realtime_end") or observation["date"]
+        try:
+            observed_at = datetime.fromisoformat(str(realtime_end)).replace(tzinfo=UTC)
+        except ValueError:
+            observed_at = datetime.now(UTC)
+        rows.append(
+            MacroObservation(
+                series_id=series_id,
+                observation_date=observation_date,
+                value=value,
+                observed_at=observed_at,
+            )
+        )
+    return rows
+
+
+def _parse_mops_major_information(
+    symbol: str, html: str, fallback_date: date
+) -> list[EventObservation]:
+    """Extract MOPS material announcements from its table-oriented response."""
+    events: list[EventObservation] = []
+    for row in BeautifulSoup(html, "html.parser").select("tr"):
+        cells = [cell.get_text(" ", strip=True) for cell in row.select("th, td")]
+        text = " ".join(cells)
+        if symbol not in text or len(cells) < 2:
+            continue
+        event_date = next((parsed for cell in cells if (parsed := _tw_date(cell))), fallback_date)
+        title = next((cell for cell in reversed(cells) if len(cell) > 8), text)
+        event_type = _mops_event_type(title)
+        if not event_type:
+            continue
+        events.append(
+            EventObservation(
+                symbol=symbol,
+                event_type=event_type,
+                title=title,
+                event_date=event_date,
+                source_url=MOPS_MAJOR_INFORMATION_URL,
+                source_code="mops",
+            )
+        )
+    return events
+
+
+def _mops_event_type(title: str) -> str | None:
+    lowered = title.lower()
+    if any(token in title for token in ("股利", "除權", "除息", "盈餘分配")):
+        return "dividend"
+    if any(token in title for token in ("財務報告", "財報", "合併財務", "財務資訊")):
+        return "financial_report"
+    if any(token in title for token in ("法人說明會", "法說會", "投資人說明會")):
+        return "investor_conference"
+    if any(token in lowered for token in ("重大訊息", "material")) or "公告" in title:
+        return "material_announcement"
+    return None
+
+
+def _classify_news(headline: str) -> tuple[str, float, bool]:
+    """Deterministic, auditable first-pass news classification."""
+    text = headline.lower()
+    rules = (
+        ("earnings", ("earnings", "財報", "營收", "eps"), 70.0),
+        ("guidance", ("guidance", "展望", "財測", "下修", "上修"), 85.0),
+        ("corporate_action", ("dividend", "股利", "除息", "buyback", "回購", "split"), 80.0),
+        ("m&a", ("acquisition", "merger", "併購", "收購"), 90.0),
+        ("regulation", ("sec", "lawsuit", "regulatory", "法規", "裁罰"), 85.0),
+        ("management", ("ceo", "董事長", "執行長", "人事"), 65.0),
+    )
+    for category, keywords, importance in rules:
+        if any(keyword in text for keyword in keywords):
+            return category, importance, importance >= 80
+    return "other", 35.0, False
+
+
 def _parse_tdcc_rows(rows: list[dict], symbols: Sequence[str]) -> list[OwnershipObservation]:
     """Normalize TDCC distribution rows from Chinese or deployment-normalized fields."""
     results: list[OwnershipObservation] = []
@@ -524,6 +745,8 @@ def _parse_tdcc_rows(rows: list[dict], symbols: Sequence[str]) -> list[Ownership
                     _first(
                         row,
                         "占集保庫存數比例",
+                        "占集保庫存數比例 (%)",
+                        "占集保庫存數比例(%)",
                         "占集保庫存數百分比",
                         "ownership_pct",
                         "OwnershipPct",

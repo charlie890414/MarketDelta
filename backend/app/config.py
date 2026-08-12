@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     pipeline_run_on_start: bool = True
     sec_cik_map: str = "{}"
     sec_user_agent: str = "market-changes-engine/0.1 contact@example.invalid"
-    mops_api_url: str | None = None
-    tdcc_api_url: str | None = None
+    fred_api_key: str | None = None
+    # A deliberately small default basket.  Configure additional series as a
+    # JSON array (for example: ["DGS10", "VIXCLS", "T10Y2Y"]).
+    fred_series: str = '["DGS10", "VIXCLS", "T10Y2Y"]'
     benchmark_symbols: str = '{"US":"SPY","TW":"0050"}'
     llm_base_url: str | None = None
     llm_api_key: str | None = None

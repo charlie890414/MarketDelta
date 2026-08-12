@@ -7,8 +7,13 @@ import pytest
 
 from app.providers.live import (
     LiveProvider,
+    _classify_news,
     _latest_closed_us_trading_date,
     _news_queries,
+    _parse_fred_observations,
+    _parse_mops_major_information,
+    _parse_tdcc_csv,
+    _parse_tpex_flow_rows,
     _sec_filing_events,
 )
 
@@ -152,3 +157,71 @@ async def test_estimates_capture_revenue_and_analyst_count(monkeypatch):
         ("revenue_estimate", Decimal(120000000000), "USD"),
         ("analyst_count", Decimal(42), "analysts"),
     ]
+
+
+def test_tdcc_official_csv_parses_shareholding_distribution():
+    rows = _parse_tdcc_csv(
+        "\ufeff資料日期,證券代號,持股分級,人數,股數,占集保庫存數比例 (%)\n"
+        "20260807,2330,15,123,456789,12.34\n",
+        ["2330"],
+    )
+
+    assert rows[0].symbol == "2330"
+    assert rows[0].snapshot_date == date(2026, 8, 7)
+    assert rows[0].holder_bucket == "15"
+    assert rows[0].ownership_pct == Decimal("12.34")
+
+
+def test_tpex_official_flow_rows_are_normalized():
+    rows = _parse_tpex_flow_rows(
+        [
+            {
+                "Code": "6488",
+                "Date": "115/08/10",
+                "ForeignInvestmentNet": "1,000",
+                "InvestmentTrustNet": "-20",
+                "DealerNet": "3",
+            }
+        ],
+        ["6488"],
+    )
+
+    assert [(row.flow_type, row.net_volume) for row in rows] == [
+        ("foreign_investor", Decimal(1000)),
+        ("investment_trust", Decimal(-20)),
+        ("dealer", Decimal(3)),
+    ]
+
+
+def test_fred_missing_values_are_excluded_and_dates_preserved():
+    rows = _parse_fred_observations(
+        "DGS10",
+        {
+            "observations": [
+                {"date": "2026-08-10", "value": "4.25", "realtime_end": "2026-08-10"},
+                {"date": "2026-08-09", "value": ".", "realtime_end": "2026-08-10"},
+            ]
+        },
+    )
+
+    assert [(row.series_id, row.observation_date, row.value) for row in rows] == [
+        ("DGS10", date(2026, 8, 10), Decimal("4.25"))
+    ]
+
+
+def test_mops_announcements_become_calendar_relevant_events():
+    rows = _parse_mops_major_information(
+        "2330",
+        "<table><tr><td>2330</td><td>115/08/10</td><td>公告現金股利除息基準日</td></tr>"
+        "<tr><td>2330</td><td>115/08/09</td><td>公告法人說明會日期</td></tr></table>",
+        date(2026, 8, 11),
+    )
+
+    assert [(row.event_type, row.event_date) for row in rows] == [
+        ("dividend", date(2026, 8, 10)),
+        ("investor_conference", date(2026, 8, 9)),
+    ]
+
+
+def test_news_classifier_marks_guidance_as_material():
+    assert _classify_news("Company raises full-year guidance") == ("guidance", 85.0, True)
