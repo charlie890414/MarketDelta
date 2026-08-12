@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -8,7 +9,7 @@ from app.changes.engine import _rarity
 from app.domain.observations import ChangeCandidate
 from app.jobs.pipeline import _fetch_domain
 from app.providers.fixture import FixtureProvider
-from app.providers.live import _number, _tw_date
+from app.providers.live import _number, _parse_mops_rows, _parse_tdcc_rows, _tw_date
 from app.scoring.scorer import score_change, severity
 
 
@@ -48,6 +49,32 @@ def test_live_provider_number_parser_handles_market_placeholders():
     assert _number("-") is None
     assert _tw_date("20260811").isoformat() == "2026-08-11"
     assert _tw_date("115/08/11").isoformat() == "2026-08-11"
+
+
+def test_mops_parser_normalizes_official_chinese_revenue_fields():
+    rows = [{"公司代號": "2330", "資料年月": "2026-07", "營業收入-當月營收": "323,000,000,000"}]
+
+    observations = _parse_mops_rows(rows, ["2330"], datetime(2026, 8, 10, tzinfo=UTC))
+
+    assert observations[0].metric == "monthly_revenue"
+    assert observations[0].value == Decimal(323000000000)
+
+
+def test_tdcc_parser_normalizes_official_chinese_distribution_fields():
+    rows = [{
+        "證券代號": "2330",
+        "資料日期": "115/08/11",
+        "持股分級": "400001以上",
+        "人數": "1,234",
+        "股數": "4,210,000,000",
+        "占集保庫存數比例": "16.20%",
+    }]
+
+    observations = _parse_tdcc_rows(rows, ["2330"])
+
+    assert observations[0].snapshot_date.isoformat() == "2026-08-11"
+    assert observations[0].holder_count == 1234
+    assert observations[0].ownership_pct == Decimal("16.20")
 
 
 @pytest.mark.asyncio

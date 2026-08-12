@@ -221,23 +221,7 @@ class LiveProvider:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             response = await client.get(self.settings.tdcc_api_url)
             response.raise_for_status()
-            for row in response.json():
-                symbol = str(row.get("symbol") or row.get("Code") or "")
-                if symbol not in symbols:
-                    continue
-                snapshot_date = _tw_date(row.get("snapshot_date") or row.get("Date"))
-                if not snapshot_date:
-                    continue
-                results.append(
-                    OwnershipObservation(
-                        symbol=symbol,
-                        snapshot_date=snapshot_date,
-                        holder_bucket=str(row.get("holder_bucket") or row.get("HolderBucket") or "unknown"),
-                        holder_count=_int(row.get("holder_count") or row.get("HolderCount")),
-                        share_count=_number(row.get("share_count") or row.get("ShareCount")),
-                        ownership_pct=_number(row.get("ownership_pct") or row.get("OwnershipPct")),
-                    )
-                )
+            results.extend(_parse_tdcc_rows(response.json(), symbols))
         return results
 
     async def news(self, symbols: Sequence[str]) -> list[NewsObservation]:
@@ -342,22 +326,7 @@ class LiveProvider:
             if self.settings.mops_api_url:
                 response = await client.get(self.settings.mops_api_url)
                 response.raise_for_status()
-                for row in response.json():
-                    symbol = str(row.get("symbol") or row.get("Code") or "")
-                    period = str(row.get("period") or row.get("Date") or "")
-                    value = _number(row.get("value") or row.get("Revenue"))
-                    if symbol not in symbols or not period or value is None:
-                        continue
-                    results.append(
-                        FundamentalObservation(
-                            symbol=symbol,
-                            metric=str(row.get("metric") or "monthly_revenue"),
-                            period=period,
-                            value=value,
-                            unit=str(row.get("unit") or "TWD"),
-                            observed_at=datetime.now(UTC),
-                        )
-                    )
+                results.extend(_parse_mops_rows(response.json(), symbols, datetime.now(UTC)))
         return results
 
 
@@ -365,7 +334,8 @@ def _number(value: object) -> Decimal | None:
     if value is None or value in ("", "-", "None"):
         return None
     try:
-        return Decimal(str(value).replace(",", ""))
+        text = str(value).replace(",", "").replace("%", "").strip()
+        return Decimal(text)
     except (InvalidOperation, ValueError):
         return None
 
@@ -382,6 +352,66 @@ def _int(value: object) -> int | None:
         return int(str(value).replace(",", "")) if value not in (None, "", "-") else None
     except ValueError:
         return None
+
+
+def _parse_mops_rows(
+    rows: list[dict], symbols: Sequence[str], observed_at: datetime
+) -> list[FundamentalObservation]:
+    """Normalize MOPS revenue rows from Chinese or deployment-normalized fields."""
+    results: list[FundamentalObservation] = []
+    for row in rows:
+        symbol = str(_first(row, "公司代號", "證券代號", "symbol", "Code") or "")
+        period = str(_first(row, "資料年月", "資料日期", "年月", "period", "Date") or "")
+        value = _number(
+            _first(row, "營業收入-當月營收", "當月營收", "本月營收", "Revenue", "value")
+        )
+        if symbol not in symbols or not period or value is None:
+            continue
+        results.append(
+            FundamentalObservation(
+                symbol=symbol,
+                metric=str(_first(row, "metric", "指標") or "monthly_revenue"),
+                period=period,
+                value=value,
+                unit=str(_first(row, "unit", "幣別") or "TWD"),
+                observed_at=observed_at,
+            )
+        )
+    return results
+
+
+def _parse_tdcc_rows(rows: list[dict], symbols: Sequence[str]) -> list[OwnershipObservation]:
+    """Normalize TDCC distribution rows from Chinese or deployment-normalized fields."""
+    results: list[OwnershipObservation] = []
+    for row in rows:
+        symbol = str(_first(row, "證券代號", "公司代號", "symbol", "Code") or "")
+        snapshot_date = _tw_date(
+            _first(row, "資料日期", "資料日", "snapshot_date", "Date")
+        )
+        if symbol not in symbols or not snapshot_date:
+            continue
+        results.append(
+            OwnershipObservation(
+                symbol=symbol,
+                snapshot_date=snapshot_date,
+                holder_bucket=str(
+                    _first(row, "持股分級", "持股級距", "holder_bucket", "HolderBucket")
+                    or "unknown"
+                ),
+                holder_count=_int(_first(row, "人數", "持有人數", "holder_count", "HolderCount")),
+                share_count=_number(_first(row, "股數", "持有股數", "share_count", "ShareCount")),
+                ownership_pct=_number(
+                    _first(
+                        row,
+                        "占集保庫存數比例",
+                        "占集保庫存數百分比",
+                        "ownership_pct",
+                        "OwnershipPct",
+                    )
+                ),
+            )
+        )
+    return results
 
 
 def _tw_date(value: object):
