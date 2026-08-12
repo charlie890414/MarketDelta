@@ -161,37 +161,6 @@ class AIInterpretationResponse(BaseModel):
     generated_at: datetime
 
 
-class AlertCreate(BaseModel):
-    name: str
-    min_score: float = 85
-    category: str | None = None
-    market: str | None = None
-
-
-class AlertUpdate(BaseModel):
-    name: str | None = None
-    min_score: float | None = None
-    category: str | None = None
-    market: str | None = None
-    is_enabled: bool | None = None
-
-
-class AlertResponse(AlertCreate):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    is_enabled: bool
-    created_at: datetime
-
-
-class AlertDeliveryResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    alert_id: int
-    change_id: int
-    delivered_at: datetime
-    status: str
-
-
 class JobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -131,18 +131,6 @@ SOURCE_CATALOG: tuple[SourceDefinition, ...] = (
         "url": "https://fred.stlouisfed.org/docs/api/",
     },
     {
-        "code": "gdelt",
-        "name": "GDELT",
-        "source_type": "news",
-        "confidence": "medium",
-        "markets": ["US", "TW"],
-        "domains": ["news"],
-        "cadence": "near_realtime",
-        "access": "public_api",
-        "enabled_by_default": False,
-        "url": "https://www.gdeltproject.org/",
-    },
-    {
         "code": "google_news",
         "name": "Google News RSS",
         "source_type": "news",

@@ -7,7 +7,6 @@ from difflib import SequenceMatcher
 
 from sqlalchemy import delete, func, select
 
-from app.alerts.service import evaluate_alerts
 from app.changes.engine import (
     detect_estimate_changes,
     detect_event_changes,
@@ -20,7 +19,6 @@ from app.changes.engine import (
 from app.config import get_settings
 from app.db.models import (
     AIInterpretation,
-    AlertDelivery,
     Change,
     DataSource,
     EstimateSnapshot,
@@ -159,10 +157,6 @@ def _remove_untracked_data(db) -> int:
     untracked_instrument_ids = select(Instrument.id).where(
         Instrument.id.not_in(tracked_instrument_ids)
     )
-    untracked_change_ids = select(Change.id).where(
-        Change.instrument_id.in_(untracked_instrument_ids)
-    )
-    db.execute(delete(AlertDelivery).where(AlertDelivery.change_id.in_(untracked_change_ids)))
     db.execute(
         delete(AIInterpretation).where(AIInterpretation.instrument_id.in_(untracked_instrument_ids))
     )
@@ -207,7 +201,6 @@ def _remove_unclosed_us_price_data(db) -> int:
         Change.current_snapshot_type == "price_daily",
         Change.current_snapshot_id.in_(invalid_snapshot_ids),
     )
-    db.execute(delete(AlertDelivery).where(AlertDelivery.change_id.in_(invalid_change_ids)))
     db.execute(delete(Change).where(Change.id.in_(invalid_change_ids)))
     result = db.execute(delete(PriceDaily).where(PriceDaily.id.in_(invalid_snapshot_ids)))
     return result.rowcount or 0
@@ -694,7 +687,6 @@ async def run_fixture_pipeline() -> dict[str, int | str]:
         _refresh_news_scores(db)
         generate_daily_reports(db)
         generate_ai_daily_brief(db)
-        evaluate_alerts(db)
         job.finished_at = datetime.now(UTC)
         job.status = "partial" if errors else "success"
         job.items_requested = len(symbols)

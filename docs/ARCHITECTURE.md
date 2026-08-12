@@ -448,7 +448,7 @@ No Redis, Celery, Kafka, TimescaleDB, or Elasticsearch in MVP.
 
                     │ TDCC / SEC / AV     │
 
-                    │ GDELT / FRED / ...  │
+                    │ Google News / FRED  │
 
                     └──────────┬──────────┘
 

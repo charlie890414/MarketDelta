@@ -1,8 +1,6 @@
 from app.db.models.core import (
     AIInterpretation,
     AIInterpretationChange,
-    Alert,
-    AlertDelivery,
     Change,
     CorporateAction,
     DailyReport,
@@ -29,8 +27,6 @@ from app.db.models.core import (
 __all__ = [
     "AIInterpretation",
     "AIInterpretationChange",
-    "Alert",
-    "AlertDelivery",
     "Change",
     "CorporateAction",
     "DailyReport",

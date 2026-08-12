@@ -4,13 +4,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.alerts.service import evaluate_alerts
 from app.api.schemas import (
     AIInterpretationResponse,
-    AlertCreate,
-    AlertDeliveryResponse,
-    AlertResponse,
-    AlertUpdate,
     ChangeResponse,
     DailyReportResponse,
     DataSourceResponse,
@@ -32,8 +27,6 @@ from app.api.schemas import (
 from app.config import get_settings
 from app.db.models import (
     AIInterpretation,
-    Alert,
-    AlertDelivery,
     Change,
     DailyReport,
     DataSource,
@@ -859,60 +852,6 @@ def remove_watchlist_item(watchlist_id: int, instrument_id: int, db: Session = D
 @router.get("/jobs", response_model=list[JobResponse])
 def list_jobs(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
     return list(db.scalars(select(JobRun).order_by(desc(JobRun.started_at)).limit(limit)))
-
-
-@router.get("/alerts", response_model=list[AlertResponse])
-def list_alerts(db: Session = Depends(get_db)):
-    return list(db.scalars(select(Alert).order_by(Alert.name)))
-
-
-@router.post("/alerts", response_model=AlertResponse, status_code=201)
-def create_alert(payload: AlertCreate, db: Session = Depends(get_db)):
-    values = payload.model_dump()
-    values["market"] = payload.market.upper() if payload.market else None
-    alert = Alert(**values)
-    db.add(alert)
-    db.commit()
-    db.refresh(alert)
-    return alert
-
-
-@router.patch("/alerts/{alert_id}", response_model=AlertResponse)
-def update_alert(alert_id: int, payload: AlertUpdate, db: Session = Depends(get_db)):
-    alert = db.scalar(select(Alert).where(Alert.id == alert_id))
-    if not alert:
-        raise HTTPException(404, "Alert not found")
-    values = payload.model_dump(exclude_unset=True)
-    if values.get("market"):
-        values["market"] = values["market"].upper()
-    for key, value in values.items():
-        setattr(alert, key, value)
-    db.commit()
-    db.refresh(alert)
-    return alert
-
-
-@router.delete("/alerts/{alert_id}", status_code=204)
-def delete_alert(alert_id: int, db: Session = Depends(get_db)):
-    alert = db.scalar(select(Alert).where(Alert.id == alert_id))
-    if not alert:
-        raise HTTPException(404, "Alert not found")
-    db.delete(alert)
-    db.commit()
-
-
-@router.get("/alerts/deliveries", response_model=list[AlertDeliveryResponse])
-def list_alert_deliveries(limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
-    return list(
-        db.scalars(select(AlertDelivery).order_by(desc(AlertDelivery.delivered_at)).limit(limit))
-    )
-
-
-@router.post("/alerts/evaluate", response_model=list[AlertDeliveryResponse])
-async def evaluate_alert_deliveries(db: Session = Depends(get_db)):
-    deliveries = evaluate_alerts(db)
-    db.commit()
-    return deliveries
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)

@@ -414,8 +414,6 @@ code = sec
 
 code = alphavantage
 
-code = gdelt
-
 code = fred
 
 ```
@@ -2630,8 +2628,6 @@ news_items
 news_instruments
 ai_interpretations
 ai_interpretation_changes
-alerts
-alert_deliveries
 ```
 
 These tables retain source lineage and structured interpretation metadata without

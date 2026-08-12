@@ -18,8 +18,6 @@ def test_documented_domain_routes_are_exposed():
         "/reports/daily",
         "/reports/daily/ai-generate",
         "/news/{news_id}/enrich",
-        "/alerts",
-        "/alerts/deliveries",
         "/watchlists/{watchlist_id}",
     }
 
@@ -34,7 +32,6 @@ def test_openapi_has_generated_response_contracts():
         "DataSourceResponse",
         "DailyReportResponse",
         "NewsResponse",
-        "AlertResponse",
         "InvestmentThesisResponse",
     } <= schemas.keys()
 

@@ -72,7 +72,7 @@ Additional runtime settings:
 Useful API groups include `/changes`, `/companies/{symbol}/news`,
 `/news/{news_id}/enrich`, `/companies/{symbol}/ownership`,
 `/companies/{symbol}/interpretations`, `/companies/{symbol}/thesis`,
-`/reports/daily`, `/watchlists`, and `/alerts`.
+`/reports/daily` and `/watchlists`.
 
 ## AI research workflow
 

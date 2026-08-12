@@ -395,27 +395,3 @@ class DailyReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Alert(Base):
-    __tablename__ = "alerts"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), unique=True)
-    min_score: Mapped[float] = mapped_column(default=85)
-    category: Mapped[str | None] = mapped_column(String(32))
-    market: Mapped[str | None] = mapped_column(String(16))
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class AlertDelivery(Base):
-    __tablename__ = "alert_deliveries"
-    __table_args__ = (
-        UniqueConstraint("alert_id", "change_id"),
-        Index("ix_alert_deliveries_delivered_at", "delivered_at"),
-    )
-    id: Mapped[int] = mapped_column(primary_key=True)
-    alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id", ondelete="CASCADE"))
-    change_id: Mapped[int] = mapped_column(ForeignKey("changes.id", ondelete="CASCADE"))
-    delivered_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    status: Mapped[str] = mapped_column(String(32), default="pending")

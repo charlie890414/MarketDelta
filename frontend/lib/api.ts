@@ -115,34 +115,6 @@ export async function getDailyReports(reportType?: string) {
   return data;
 }
 
-export async function getAlerts() {
-  const { data, error } = await client.GET("/alerts");
-  if (error || !data) throw new Error("Alerts unavailable");
-  return data;
-}
-
-export async function updateAlert(alertId: number, body: {
-  name?: string;
-  min_score?: number;
-  category?: string | null;
-  market?: string | null;
-  is_enabled?: boolean;
-}) {
-  const { data, error } = await client.PATCH("/alerts/{alert_id}", {
-    params: { path: { alert_id: alertId } },
-    body,
-  });
-  if (error || !data) throw new Error("Alert update failed");
-  return data;
-}
-
-export async function deleteAlert(alertId: number) {
-  const { error } = await client.DELETE("/alerts/{alert_id}", {
-    params: { path: { alert_id: alertId } },
-  });
-  if (error) throw new Error("Alert deletion failed");
-}
-
 export async function createWatchlist(name: string, description?: string) {
   const { data, error } = await client.POST("/watchlists", {
     body: { name, description },
