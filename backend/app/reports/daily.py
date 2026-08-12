@@ -24,6 +24,7 @@ def _change_payload(change: Change, instrument: Instrument) -> dict:
         "severity": change.severity,
         "total_score": change.total_score,
         "percentage_change": _number(change.percentage_change),
+        "headline": change.metadata_.get("headline") if change.metadata_ else None,
     }
 
 

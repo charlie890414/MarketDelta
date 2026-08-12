@@ -1,12 +1,17 @@
 import csv
 import json
+from asyncio import to_thread
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
 from hashlib import sha1
 from io import StringIO
+from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
 import httpx
+import yfinance as yf
 
 from app.config import get_settings
 from app.domain.observations import (
@@ -18,6 +23,22 @@ from app.domain.observations import (
     OwnershipObservation,
     PriceObservation,
 )
+
+US_MARKET_TIMEZONE = ZoneInfo("America/New_York")
+US_DAILY_CLOSE_AVAILABLE_AT = time(17)
+
+
+def _latest_closed_us_trading_date(now: datetime | None = None) -> date:
+    """Return the latest US date safe to treat as a completed daily bar.
+
+    Yahoo can publish a provisional daily bar during regular trading. We only
+    accept the current date after a one-hour post-close buffer (17:00 ET).
+    Weekends and holidays are safe: Yahoo returns no bar for non-trading dates.
+    """
+    market_now = (now or datetime.now(UTC)).astimezone(US_MARKET_TIMEZONE)
+    if market_now.weekday() < 5 and market_now.time() >= US_DAILY_CLOSE_AVAILABLE_AT:
+        return market_now.date()
+    return market_now.date() - timedelta(days=1)
 
 
 class LiveProvider:
@@ -52,7 +73,9 @@ class LiveProvider:
                         )
                     )
                 covered = {observation.symbol for observation in results}
-                missing = [symbol for symbol in symbols if symbol.isdigit() and symbol not in covered]
+                missing = [
+                    symbol for symbol in symbols if symbol.isdigit() and symbol not in covered
+                ]
                 if missing:
                     response = await client.get(
                         "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close"
@@ -73,57 +96,96 @@ class LiveProvider:
                                 volume=_number(row.get("TradingShares")),
                             )
                         )
+            # Use yfinance for US daily OHLCV data. Alpha Vantage remains reserved
+            # for estimates and earnings events because its request quota is limited.
+            covered = {row.symbol for row in results}
             for symbol in symbols:
-                if not symbol.isalpha() or not self.settings.alpha_vantage_api_key:
+                if not symbol.isalpha() or symbol in covered:
                     continue
-                response = await client.get(
-                    "https://www.alphavantage.co/query",
-                    params={
-                        "function": "TIME_SERIES_DAILY",
-                        "symbol": symbol,
-                        "outputsize": "compact",
-                        "apikey": self.settings.alpha_vantage_api_key,
-                    },
-                )
-                response.raise_for_status()
-                series = response.json().get("Time Series (Daily)", {})
-                if not series:
+                results.extend(await self._us_prices(symbol))
+        return results
+
+    async def price_history(
+        self, symbols: Sequence[str], start_date: date
+    ) -> list[PriceObservation]:
+        """Fetch daily closes for an initial, bounded bootstrap of price history."""
+        results: list[PriceObservation] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            for symbol in symbols:
+                if symbol.isdigit():
+                    results.extend(await self._twse_price_history(client, symbol, start_date))
+                elif symbol.isalpha():
+                    results.extend(await self._us_price_history(symbol, start_date))
+        return results
+
+    async def _us_prices(self, symbol: str) -> list[PriceObservation]:
+        return await self._us_price_history(
+            symbol, _latest_closed_us_trading_date() - timedelta(days=7)
+        )
+
+    async def _us_price_history(self, symbol: str, start_date: date) -> list[PriceObservation]:
+        """Retrieve daily OHLCV from yfinance without blocking the async pipeline."""
+        try:
+            latest_closed_date = _latest_closed_us_trading_date()
+            history = await to_thread(
+                yf.Ticker(symbol).history,
+                start=start_date.isoformat(),
+                end=(latest_closed_date + timedelta(days=1)).isoformat(),
+                auto_adjust=False,
+                actions=False,
+            )
+            observations = []
+            for trading_date, row in history.iterrows():
+                close = row.get("Close")
+                if close is None or trading_date.date() > latest_closed_date:
                     continue
-                trading_date = max(series)
-                row = series[trading_date]
-                results.append(
+                observations.append(
                     PriceObservation(
                         symbol=symbol,
-                        trading_date=datetime.fromisoformat(trading_date).date(),
-                        close=Decimal(row["4. close"]),
-                        volume=Decimal(row["5. volume"]),
+                        trading_date=trading_date.date(),
+                        close=Decimal(str(close)),
+                        volume=_number(row.get("Volume")),
                     )
                 )
-            # Stooq is a free, keyless fallback for US daily OHLCV data.
-            covered = {row.symbol for row in results}
-            if self.settings.stooq_enabled:
-                for symbol in symbols:
-                    if not symbol.isalpha() or symbol in covered:
-                        continue
-                    try:
-                        response = await client.get(
-                            "https://stooq.com/q/d/l/",
-                            params={"s": f"{symbol.lower()}.us", "i": "d"},
-                        )
-                        response.raise_for_status()
-                        rows = list(csv.DictReader(StringIO(response.text)))
-                        if not rows:
-                            continue
-                        row = rows[-1]
-                        results.append(PriceObservation(
+            return observations
+        except Exception:  # noqa: BLE001 - yfinance wraps transport and parsing failures variably.
+            return []
+
+    async def _twse_price_history(
+        self, client: httpx.AsyncClient, symbol: str, start_date: date
+    ) -> list[PriceObservation]:
+        observations: dict[date, PriceObservation] = {}
+        month = date(start_date.year, start_date.month, 1)
+        current_month = datetime.now(UTC).date().replace(day=1)
+        while month <= current_month:
+            try:
+                response = await client.get(
+                    "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
+                    params={
+                        "response": "json",
+                        "date": month.strftime("%Y%m%d"),
+                        "stockNo": symbol,
+                    },
+                    headers={"User-Agent": "market-changes-engine/0.1"},
+                )
+                response.raise_for_status()
+                for row in response.json().get("data", []):
+                    trading_date = _tw_date(row[0])
+                    close = _number(row[6]) if len(row) > 6 else None
+                    if trading_date and trading_date >= start_date and close is not None:
+                        observations[trading_date] = PriceObservation(
                             symbol=symbol,
-                            trading_date=date.fromisoformat(row["Date"]),
-                            close=Decimal(row["Close"]),
-                            volume=_number(row.get("Volume")),
-                        ))
-                    except (httpx.HTTPError, KeyError, ValueError, InvalidOperation):
-                        continue
-        return results
+                            trading_date=trading_date,
+                            close=close,
+                            volume=_number(row[1]) if len(row) > 1 else None,
+                        )
+            except (httpx.HTTPError, IndexError, TypeError, ValueError):
+                pass
+            if month.month == 12:
+                month = date(month.year + 1, 1, 1)
+            else:
+                month = date(month.year, month.month + 1, 1)
+        return list(observations.values())
 
     async def estimates(self, symbols: Sequence[str]) -> list[EstimateObservation]:
         if not self.settings.alpha_vantage_api_key:
@@ -249,52 +311,49 @@ class LiveProvider:
         return results
 
     async def news(self, symbols: Sequence[str]) -> list[NewsObservation]:
-        if not self.settings.alpha_vantage_api_key:
-            return []
         results: list[NewsObservation] = []
+        oldest_allowed = datetime.now(UTC) - timedelta(days=self.settings.news_max_age_days)
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            response = await client.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function": "NEWS_SENTIMENT",
-                    "tickers": ",".join(symbols),
-                    "limit": 100,
-                    "apikey": self.settings.alpha_vantage_api_key,
-                },
-            )
-            response.raise_for_status()
-            for item in response.json().get("feed", []):
-                headline = str(item.get("title", "")).strip()
-                url = str(item.get("url", "")).strip()
-                published = str(item.get("time_published", ""))
-                if not headline or not url or len(published) < 15:
+            for symbol in symbols:
+                if not symbol.isalpha():
                     continue
                 try:
-                    published_at = datetime.strptime(published[:15], "%Y%m%dT%H%M%S").replace(
-                        tzinfo=UTC
+                    response = await client.get(
+                        "https://news.google.com/rss/search",
+                        params={
+                            "q": f"{symbol} stock",
+                            "hl": "en-US",
+                            "gl": "US",
+                            "ceid": "US:en",
+                        },
                     )
-                except ValueError:
+                    response.raise_for_status()
+                    items = ElementTree.fromstring(response.content).findall(".//item")
+                except (httpx.HTTPError, ElementTree.ParseError):
                     continue
-                tickers = {
-                    str(entry.get("ticker", "")).upper()
-                    for entry in item.get("ticker_sentiment", [])
-                }
-                matched = next((symbol for symbol in symbols if symbol.upper() in tickers), None)
-                sentiment = _number(item.get("overall_sentiment_score"))
-                results.append(
-                    NewsObservation(
-                        symbol=matched,
-                        external_id=sha1(url.encode(), usedforsecurity=False).hexdigest(),
-                        headline=headline,
-                        published_at=published_at,
-                        source_name=item.get("source"),
-                        source_url=url,
-                        category=(item.get("topics") or [{}])[0].get("topic"),
-                        importance_score=float(abs(sentiment or 0) * 100),
-                        is_material=abs(sentiment or 0) >= Decimal("0.35"),
-                        summary=item.get("summary"),
+                for item in items:
+                    headline = (item.findtext("title") or "").strip()
+                    url = (item.findtext("link") or "").strip()
+                    published = (item.findtext("pubDate") or "").strip()
+                    source = item.find("source")
+                    if not headline or not url or not published:
+                        continue
+                    try:
+                        published_at = parsedate_to_datetime(published).astimezone(UTC)
+                    except (TypeError, ValueError):
+                        continue
+                    if published_at < oldest_allowed:
+                        continue
+                    results.append(
+                        NewsObservation(
+                            symbol=symbol,
+                            external_id=sha1(url.encode(), usedforsecurity=False).hexdigest(),
+                            headline=headline,
+                            published_at=published_at,
+                            source_name=source.text if source is not None else "Google News",
+                            source_url=url,
+                        )
                     )
-                )
         return results
 
     async def fundamentals(self, symbols: Sequence[str]) -> list[FundamentalObservation]:
@@ -348,11 +407,18 @@ class LiveProvider:
                     for fact in units:
                         if fact.get("fp") != "FY" or not fact.get("fy") or not fact.get("filed"):
                             continue
-                        results.append(FundamentalObservation(
-                            symbol=symbol, metric=metric, period=f"FY{fact['fy']}",
-                            value=Decimal(str(fact["val"])), unit=unit or "USD",
-                            observed_at=datetime.fromisoformat(fact["filed"]).replace(tzinfo=UTC),
-                        ))
+                        results.append(
+                            FundamentalObservation(
+                                symbol=symbol,
+                                metric=metric,
+                                period=f"FY{fact['fy']}",
+                                value=Decimal(str(fact["val"])),
+                                unit=unit or "USD",
+                                observed_at=datetime.fromisoformat(fact["filed"]).replace(
+                                    tzinfo=UTC
+                                ),
+                            )
+                        )
             if self.settings.mops_api_url:
                 response = await client.get(self.settings.mops_api_url)
                 response.raise_for_status()
@@ -415,9 +481,7 @@ def _parse_tdcc_rows(rows: list[dict], symbols: Sequence[str]) -> list[Ownership
     results: list[OwnershipObservation] = []
     for row in rows:
         symbol = str(_first(row, "證券代號", "公司代號", "symbol", "Code") or "")
-        snapshot_date = _tw_date(
-            _first(row, "資料日期", "資料日", "snapshot_date", "Date")
-        )
+        snapshot_date = _tw_date(_first(row, "資料日期", "資料日", "snapshot_date", "Date"))
         if symbol not in symbols or not snapshot_date:
             continue
         results.append(

@@ -1,10 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.alerts.service import dispatch_alerts, evaluate_alerts
+from app.alerts.service import evaluate_alerts
 from app.api.schemas import (
     AIInterpretationResponse,
     AlertCreate,
@@ -49,11 +49,35 @@ from app.db.models import (
     WatchlistItem,
 )
 from app.db.session import get_db
-from app.instruments.registry import lookup_twse_company
+from app.instruments.registry import lookup_sec_company, lookup_twse_company
 from app.interpretation.service import generate_interpretation
+from app.jobs.pipeline import run_price_history_backfill_sync
 from app.reports.daily import generate_daily_reports
 
 router = APIRouter()
+
+
+def _effective_at(db: Session, change: Change) -> datetime | None:
+    """Return the source-data timestamp rather than the pipeline detection time."""
+    if change.current_snapshot_id is None:
+        return None
+    model_and_field = {
+        "price_daily": (PriceDaily, "trading_date"),
+        "flow_daily": (FlowDaily, "trading_date"),
+        "estimate_snapshots": (EstimateSnapshot, "observed_at"),
+        "fundamentals": (FundamentalSnapshot, "observed_at"),
+        "ownership_snapshots": (OwnershipSnapshot, "snapshot_date"),
+        "events": (Event, "event_date"),
+        "news_items": (NewsItem, "published_at"),
+    }.get(change.current_snapshot_type or "")
+    if model_and_field is None:
+        return None
+    model, field = model_and_field
+    snapshot = db.get(model, change.current_snapshot_id)
+    if snapshot is None or getattr(snapshot, field) is None:
+        return None
+    value = getattr(snapshot, field)
+    return value if isinstance(value, datetime) else datetime.combine(value, datetime.min.time(), UTC)
 
 
 @router.get("/health")
@@ -80,6 +104,7 @@ def list_changes(
         .where(
             Change.total_score >= min_score,
             Change.detected_at >= datetime.now(UTC) - timedelta(hours=hours),
+            Instrument.id.in_(select(WatchlistItem.instrument_id).distinct()),
         )
         .order_by(desc(Change.total_score), desc(Change.detected_at))
         .limit(limit)
@@ -116,6 +141,9 @@ def list_changes(
             source_confidence=source.confidence if source else None,
             previous_snapshot_type=change.previous_snapshot_type,
             current_snapshot_type=change.current_snapshot_type,
+            headline=change.metadata_.get("headline") if change.metadata_ else None,
+            event_title=change.metadata_.get("title") if change.metadata_ else None,
+            effective_at=_effective_at(db, change),
             detected_at=change.detected_at,
         )
         for change, instrument, source in db.execute(query)
@@ -154,6 +182,9 @@ def get_change(change_id: int, db: Session = Depends(get_db)):
         source_confidence=source.confidence if source else None,
         previous_snapshot_type=change.previous_snapshot_type,
         current_snapshot_type=change.current_snapshot_type,
+        headline=change.metadata_.get("headline") if change.metadata_ else None,
+        event_title=change.metadata_.get("title") if change.metadata_ else None,
+        effective_at=_effective_at(db, change),
         detected_at=change.detected_at,
     )
 
@@ -219,20 +250,30 @@ def search_companies(
         .limit(limit)
         )
     )
-    query = q.strip()
-    if rows or not (query.isdigit() and len(query) in (4, 6)):
+    query = q.strip().upper()
+    is_tw_symbol = query.isdigit() and len(query) in (4, 6)
+    is_us_symbol = query.isalpha() and 1 <= len(query) <= 5
+    if rows or not (is_tw_symbol or is_us_symbol):
         return rows
 
-    official_profile = lookup_twse_company(query)
-    if not official_profile:
-        return rows
-    company_name, exchange = official_profile
+    official_profile = lookup_twse_company(query) if is_tw_symbol else None
+    if official_profile:
+        company_name, exchange = official_profile
+        market = "TW"
+        currency = "TWD"
+    else:
+        company_name = lookup_sec_company(query.upper(), get_settings().sec_user_agent)
+        if not company_name:
+            return rows
+        exchange = None
+        market = "US"
+        currency = "USD"
     instrument = Instrument(
         symbol=query,
-        market="TW",
+        market=market,
         exchange=exchange,
         company_name=company_name,
-        currency="TWD",
+        currency=currency,
     )
     db.add(instrument)
     db.commit()
@@ -282,6 +323,9 @@ def company_changes(symbol: str, db: Session = Depends(get_db)):
             source_confidence=source.confidence if source else None,
             previous_snapshot_type=change.previous_snapshot_type,
             current_snapshot_type=change.current_snapshot_type,
+            headline=change.metadata_.get("headline") if change.metadata_ else None,
+            event_title=change.metadata_.get("title") if change.metadata_ else None,
+            effective_at=_effective_at(db, change),
             detected_at=change.detected_at,
         )
         for change, source in changes
@@ -426,14 +470,21 @@ def list_news(
 
 
 @router.get("/companies/{symbol}/news", response_model=list[NewsResponse])
-def company_news(symbol: str, db: Session = Depends(get_db)):
+def company_news(
+    symbol: str,
+    days: int = Query(7, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
     instrument = db.scalar(select(Instrument).where(Instrument.symbol == symbol.upper()))
     if not instrument:
         raise HTTPException(404, "Company not found")
     rows = db.execute(
         select(NewsItem)
         .join(NewsInstrument, NewsInstrument.news_item_id == NewsItem.id)
-        .where(NewsInstrument.instrument_id == instrument.id)
+        .where(
+            NewsInstrument.instrument_id == instrument.id,
+            NewsItem.published_at >= datetime.now(UTC) - timedelta(days=days),
+        )
         .order_by(desc(NewsItem.published_at))
         .limit(100)
     )
@@ -599,7 +650,10 @@ def list_watchlist_items(watchlist_id: int, db: Session = Depends(get_db)):
     "/watchlists/{watchlist_id}/items", response_model=WatchlistItemResponse, status_code=201
 )
 def add_watchlist_item(
-    watchlist_id: int, payload: WatchlistItemCreate, db: Session = Depends(get_db)
+    watchlist_id: int,
+    payload: WatchlistItemCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     if not db.scalar(select(Watchlist).where(Watchlist.id == watchlist_id)):
         raise HTTPException(404, "Watchlist not found")
@@ -618,6 +672,8 @@ def add_watchlist_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    if get_settings().initial_price_backfill_days > 0:
+        background_tasks.add_task(run_price_history_backfill_sync, instrument.symbol)
     return WatchlistItemResponse(
         id=item.id,
         watchlist_id=watchlist_id,
@@ -697,13 +753,6 @@ def list_alert_deliveries(limit: int = Query(100, ge=1, le=500), db: Session = D
 @router.post("/alerts/evaluate", response_model=list[AlertDeliveryResponse])
 async def evaluate_alert_deliveries(db: Session = Depends(get_db)):
     deliveries = evaluate_alerts(db)
-    settings = get_settings()
-    await dispatch_alerts(
-        deliveries,
-        settings.alert_webhook_url,
-        settings.alert_webhook_retries,
-        settings.alert_webhook_backoff_seconds,
-    )
     db.commit()
     return deliveries
 

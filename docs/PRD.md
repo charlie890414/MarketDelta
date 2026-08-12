@@ -1774,7 +1774,7 @@ SEC EDGAR
 
 Alpha Vantage
 
-Stooq
+Yahoo Finance (`yfinance`)
 
 FRED
 

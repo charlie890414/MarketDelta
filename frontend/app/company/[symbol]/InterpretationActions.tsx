@@ -13,13 +13,13 @@ export default function InterpretationActions({ symbol }: { symbol: string }) {
     setMessage("");
     try {
       await generateCompanyInterpretation(symbol);
-      setMessage("Interpretation generated. Refresh to view the latest result.");
+      setMessage("已產生解讀；重新整理即可查看最新結果。");
     } catch {
-      setMessage("No material changes are available for interpretation.");
+      setMessage("目前沒有可供解讀的重大變化。");
     } finally {
       setBusy(false);
     }
   }
 
-  return <div className="toolbar"><button className="pill selected" disabled={busy} onClick={generate}>{busy ? "GENERATING..." : "GENERATE"}</button>{message && <span className="feed-meta">{message}</span>}</div>;
+  return <div className="toolbar"><button className="pill selected" disabled={busy} onClick={generate}>{busy ? "產生中..." : "產生解讀"}</button>{message && <span className="feed-meta">{message}</span>}</div>;
 }

@@ -614,6 +614,12 @@ export interface components {
             previous_snapshot_type: string | null;
             /** Current Snapshot Type */
             current_snapshot_type: string | null;
+            /** Headline */
+            headline: string | null;
+            /** Event Title */
+            event_title: string | null;
+            /** Effective At */
+            effective_at: string | null;
             /**
              * Detected At
              * Format: date-time

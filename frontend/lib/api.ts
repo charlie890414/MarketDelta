@@ -159,7 +159,7 @@ export async function createWatchlist(name: string, description?: string) {
   return data;
 }
 
-export async function updateWatchlist(watchlistId: number, body: { name?: string; description?: string }) {
+export async function updateWatchlist(watchlistId: number, body: { name?: string; description?: string | null }) {
   const { data, error } = await client.PATCH("/watchlists/{watchlist_id}", {
     params: { path: { watchlist_id: watchlistId } },
     body,

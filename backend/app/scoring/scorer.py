@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from math import pow
+
 from app.domain.observations import ChangeCandidate
 
 WEIGHTS = {
@@ -7,6 +10,19 @@ WEIGHTS = {
     "freshness": 0.15,
     "source_quality": 0.10,
 }
+
+NEWS_FRESHNESS_HALF_LIFE_DAYS = 3
+
+
+def freshness_score(category: str, observed_at: datetime, *, now: datetime | None = None) -> float:
+    """Return a 0–100 freshness score, with news decaying by its publication age."""
+    now = now or datetime.now(UTC)
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.replace(tzinfo=UTC)
+    age_days = max((now - observed_at).total_seconds() / 86400, 0)
+    if category == "news":
+        return round(100 * pow(0.5, age_days / NEWS_FRESHNESS_HALF_LIFE_DAYS), 2)
+    return max(0, min(100, 100 - age_days * 10))
 
 
 def severity(score: float) -> str:

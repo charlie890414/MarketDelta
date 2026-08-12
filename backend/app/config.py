@@ -12,19 +12,17 @@ class Settings(BaseSettings):
     mce_use_live: bool = False
     pipeline_interval_hours: int = 6
     pipeline_run_on_start: bool = True
-    alert_webhook_url: str | None = None
     sec_cik_map: str = "{}"
     sec_user_agent: str = "market-changes-engine/0.1 contact@example.invalid"
     mops_api_url: str | None = None
     tdcc_api_url: str | None = None
     benchmark_symbols: str = '{"US":"SPY","TW":"0050"}'
-    alert_webhook_retries: int = 3
-    alert_webhook_backoff_seconds: float = 1.0
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = 20.0
-    stooq_enabled: bool = True
+    initial_price_backfill_days: int = 90
+    news_max_age_days: int = 7
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

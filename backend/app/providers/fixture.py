@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,6 +22,9 @@ class FixtureProvider:
     async def prices(self, symbols: list[str]) -> list[PriceObservation]:
         data = json.loads((FIXTURES / "twse" / "prices.json").read_text())
         return [PriceObservation(**row) for row in data if row["symbol"] in symbols]
+
+    async def price_history(self, symbols: list[str], start_date: date) -> list[PriceObservation]:
+        return [row for row in await self.prices(symbols) if row.trading_date >= start_date]
 
     async def estimates(self, symbols: list[str]) -> list[EstimateObservation]:
         data = json.loads((FIXTURES / "alphavantage" / "estimates.json").read_text())

@@ -24,7 +24,7 @@ from app.db.models import (
     PriceDaily,
 )
 from app.domain.observations import ChangeCandidate
-from app.scoring.scorer import score_change
+from app.scoring.scorer import freshness_score, score_change
 
 
 def _source_quality(source: DataSource | None) -> float:
@@ -88,11 +88,10 @@ def _make_change(
     observed_at = current.observed_at if hasattr(current, "observed_at") else datetime.combine(
         current.trading_date, datetime.min.time(), tzinfo=UTC
     )
-    age_days = max((datetime.now(UTC) - observed_at).total_seconds() / 86400, 0)
     scores = score_change(
         candidate,
         rarity=rarity,
-        freshness=max(0, min(100, 100 - age_days * 10)),
+        freshness=freshness_score(category, observed_at),
         source_quality=_source_quality(source),
     )
     return Change(

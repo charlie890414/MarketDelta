@@ -10,7 +10,7 @@ from app.domain.observations import ChangeCandidate
 from app.jobs.pipeline import _fetch_domain
 from app.providers.fixture import FixtureProvider
 from app.providers.live import _number, _parse_mops_rows, _parse_tdcc_rows, _tw_date
-from app.scoring.scorer import score_change, severity
+from app.scoring.scorer import freshness_score, score_change, severity
 
 
 def test_compare_percentage_uses_absolute_baseline():
@@ -62,6 +62,14 @@ def test_new_event_and_news_changes_are_feed_visible(category):
     )
     result = score_change(candidate, source_quality=100)
     assert result["total"] >= 50
+
+
+def test_news_freshness_decays_by_half_every_three_days():
+    published_at = datetime(2026, 8, 1, tzinfo=UTC)
+
+    assert freshness_score("news", published_at, now=published_at) == 100
+    assert freshness_score("news", published_at, now=datetime(2026, 8, 4, tzinfo=UTC)) == 50
+    assert freshness_score("news", published_at, now=datetime(2026, 8, 7, tzinfo=UTC)) == 25
 
 
 def test_live_provider_number_parser_handles_market_placeholders():

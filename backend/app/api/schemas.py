@@ -27,6 +27,9 @@ class ChangeResponse(BaseModel):
     source_confidence: str | None
     previous_snapshot_type: str | None
     current_snapshot_type: str | None
+    headline: str | None = None
+    event_title: str | None = None
+    effective_at: datetime | None = None
     detected_at: datetime
 
 
